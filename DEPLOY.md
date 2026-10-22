@@ -1,10 +1,24 @@
-# GitHub Pages 发布指南（账号：Leemitz）
+# 发布 FluidGlow Audio 到 GitHub Pages
 
-> 当前 GitHub 连接不提供新建仓库或启用 Pages 的能力，因此这两步须在 GitHub 网页上操作。
+仓库：**https://github.com/Leemitz/fluidglow-audio**
 
-1. 打开 https://github.com/new ，将仓库名设为 `fluidglow-audio`，可见性选择 **Public**，主分支使用 `main`。创建时不用勾选添加 README / .gitignore / License（压缩包内已提供）。
-2. 解压 `fluidglow-audio.zip`，打开创建的仓库，使用 **Add file → Upload files**，将解压后文件夹内部的所有文件上传到仓库根目录。确保根目录直接有 `index.html`，不是嵌套文件夹。
-3. 进入仓库 **Settings → Pages → Build and deployment**，选择 **Deploy from a branch**，Branch: **main**，Folder: **/(root)**，Save。
-4. GitHub Pages 完成部署后，访问 **https://leemitz.github.io/fluidglow-audio/** 。首次部署可能不是立即生效；以 Pages 设置界面显示的实际站点地址为准。
+所有网页源码已经上传至 `main` 分支根目录（包括 `index.html`、`fluidglow.js`、`app.js` 和 `styles.css`）。无需重新上传文件，也无需任何构建命令。
 
-验证：在页面选择自己的音频文件，确认三个频段表显示变化；麦克风模式需浏览器授予权限。音频仅在浏览器中处理。
+## 仅需开启 GitHub Pages
+
+1. 打开 https://github.com/Leemitz/fluidglow-audio/settings/pages
+2. 在 **Build and deployment** 下，将 **Source** 设为 **Deploy from a branch**。
+3. 在 **Branch** 中选择 **main**，文件夹选择 **/(root)**，点击 **Save**。
+4. 部署成功后，预计访问地址：https://leemitz.github.io/fluidglow-audio/
+
+注意：在 GitHub Pages 未开启、部署未完成时，上方只是预计地址，不代表已上线。
+
+## 验收
+
+- 用 Chrome / Safari 打开网页，确认 WebGL 油滴可以流动。
+- 点击 **选择音乐**，载入本地 MP3 或 WAV，低中高频表随声音变化。
+- 观察低频改变体积、中频改变虹彩油膜、高频改变边缘光泽；液滴中心的融合参数 `merge`、`spread` 不随音乐跳变。
+- 麦克风模式需要浏览器同意权限，且在 HTTPS（GitHub Pages）环境使用。
+- 音频数据仅在设备本地处理，不会上传到服务器。
+
+如果打不开网页，先检查 Pages 设置界面里的发布状态与 Actions 构建结果。
