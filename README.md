@@ -7,9 +7,9 @@ A music-reactive iridescent metaball visualizer built on [FluidGlow](https://git
 - Upload a local MP3/WAV/OGG/M4A audio file, play/pause, seek, or drag and drop.
 - Microphone input for live sound (HTTPS or localhost; browser permission required).
 - Built-in *silent simulated beat* so the visual can be explored without a song. This mode is **not** real audio analysis.
-- FFT with distinct bands for bass (35–180 Hz), mid (180–1900 Hz), and high (1900–10000 Hz).
-- Attack/release smoothing (bass: 80/320 ms, mid: 180/550 ms, high: 25/130 ms).
-- Bass → gentle `size` breathing; mid → `film` and `hueOff`; high → `glow` and subtle `fringe` response.
+- FFT with distinct bands for bass (35–180 Hz), mid (180–1900 Hz), and high (1900–10000 Hz), plus actual **time-domain RMS loudness** (not FFT average).
+- Attack/release smoothing (loudness: 45/260 ms, bass: 80/320 ms, mid: 180/550 ms, high: 25/130 ms).
+- Overall RMS loudness → visible `glow` and soft outer `aura`; bass → gentle `size` breathing; mid → `film` and `hueOff`; high → subtle `fringe` detail only.
 - The `merge` and `spread` topology parameters **never depend on audio**, which minimizes the abrupt neck changes observed when droplets approach.
 - Sliders for sensitivity, visual response, and independent orbital motion speed.
 - Audio stays entirely on the user's machine. No uploads, analytics, cookies, or third-party scripts.
@@ -34,7 +34,7 @@ No build step, configuration files or third-party services are needed.
 
 ## Design notes
 
-Audio does not control orbital centers or the smooth-minimum merge threshold. Instead, the shader continuously evolves and the audio modifies its perceived energy (subtle radius pulsation, oil-film interference width/color, rim brightness). All incoming spectral energy passes through an attack/release exponential envelope using delta time.
+Audio does not control orbital centers or the smooth-minimum merge threshold. Instead, the shader continuously evolves and the audio modifies its perceived energy (subtle radius pulsation, oil-film interference width/color, rim brightness and an outer aura). This v1.1 iteration switches primary luminance to time-domain RMS and adds a dedicated loudness meter. A corrected edge smoothstep avoids relying on undefined reversed-edge behavior. All incoming spectral energy passes through an attack/release exponential envelope using delta time.
 
 This is **phase 1**. Liquid-surface standing waves, viscous body dynamics, and realistic physical merging are out of scope.
 
