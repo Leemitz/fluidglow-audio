@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   var DEFAULTS = {
-    speed: 0.24, glow: 2.06, aura: 0.055, waveA: 0.0, waveB: 0.0, fringe: 5.85, edge: 0.002,
+    speed: 0.24, glow: 2.06, aura: 0.055, waveA: 0.0, waveB: 0.0, surfaceMotion: 0.0, fringe: 5.85, edge: 0.002,
     sat: 1.20, hueSpeed: 0.04, hueOff: 0.00,
     size: 1.35, spread: 1.70, incline: 0.42, body: 0.00,
     film: 0.30, light: 1.00, gamma: 1.60, merge: 0.17,
@@ -15,8 +15,8 @@
   };
   var FRAG = [
     'precision highp float;',
-    'uniform vec2 u_res;uniform float u_time;',
-    'uniform float u_glow,u_aura,u_waveA,u_waveB,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
+    'uniform vec2 u_res;uniform float u_time,u_motionTime;',
+    'uniform float u_glow,u_aura,u_waveA,u_waveB,u_surfaceMotion,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
     'vec3 hue(float h){vec3 c=abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0;return clamp(c,0.0,1.0);}',
     'vec2 C[4];float R[4];',
     'float smin(float a,float b,float k){float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);return mix(b,a,h)-k*h*(1.0-h);}',
@@ -26,7 +26,10 @@
     // Constant indices avoid WebGL 1 array indexing restrictions in shader helpers.
     'float dropSdf(vec2 p,vec2 center,float radius,float id){',
     '  vec2 q=p-center;float a=atan(q.y,q.x);',
-    '  float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13);',
+    // Independent ambient deformation; this is never bound to music.
+    '  float organic=0.048*sin(2.0*a+u_motionTime*0.69+id*1.37)',
+    '    +0.022*sin(4.0*a-u_motionTime*0.96-id*2.31);',
+    '  float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13)+u_surfaceMotion*organic;',
     '  return length(q)-radius*(1.0+clamp(ripple,-0.12,0.12));}',
     'float scene(vec2 p){float k=max(u_merge,1e-4);',
     '  float d=dropSdf(p,C[0],R[0],0.0);',
@@ -67,7 +70,7 @@
   ].join('\n');
   // Last-known-safe fallback: only the ripple is disabled.
   var FRAG_SAFE = FRAG.replace(
-    'float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13);',
+    'float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13)+u_surfaceMotion*organic;',
     'float ripple=0.0;'
   );
   var VERT = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
@@ -146,7 +149,8 @@
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     var uRes = gl.getUniformLocation(prog, 'u_res'),
-        uTime = gl.getUniformLocation(prog, 'u_time'), U = {};
+        uTime = gl.getUniformLocation(prog, 'u_time'),
+        uMotionTime = gl.getUniformLocation(prog, 'u_motionTime'), U = {};
     for (k in DEFAULTS) if (k !== 'speed') U[k] = gl.getUniformLocation(prog, 'u_' + k);
     var maxDpr = options.maxDpr || 1.5;
     function resize() {
@@ -157,12 +161,13 @@
     }
     window.addEventListener('resize', resize); resize();
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
-    var acc = 0, last = performance.now(), raf = null, alive = true;
+    var acc = 0, naturalTime = 0, last = performance.now(), raf = null, alive = true;
     function frame(now) {
       if (!alive) return;
-      var dt = Math.min((now - last) / 1000, 0.05); last = now; acc += dt * P.speed;
+      var dt = Math.min((now - last) / 1000, 0.05); last = now; acc += dt * P.speed; naturalTime += dt;
       gl.uniform2f(uRes, canvas.width, canvas.height);
       gl.uniform1f(uTime, reduce ? 8.0 : acc);
+      if (uMotionTime !== null) gl.uniform1f(uMotionTime, naturalTime);
       for (var kk in U) gl.uniform1f(U[kk], P[kk]);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       if (!reduce) raf = requestAnimationFrame(frame);
