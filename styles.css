@@ -13,3 +13,5 @@
 .fallback-visual span:nth-child(3){transform:translate(-90px,80px) scale(.48);animation-delay:-9s;filter:blur(12px)}
 @keyframes floating{0%{border-radius:46% 54% 52% 48%;translate:-16px 16px}100%{border-radius:57% 43% 48% 52%;translate:22px -19px}}
 @media(max-width:760px){.fallback-visual span{width:65vw}}
+/* RMS loudness has its own clearly identified visual channel. */
+.loud-glyph{color:#b6ecff}.loud-row .meter span{background:linear-gradient(90deg,#79e4dc,#caabfa)}
