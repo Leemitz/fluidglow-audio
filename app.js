@@ -20,7 +20,7 @@
   const glow = FluidGlow({
     canvas: $('fluid-canvas'), ...PARAMS,
     zoom: window.innerWidth < 760 ? 1.14 : 1.24,
-    sat: 1.20, hueSpeed: 0.038, maxDpr: 1.5
+    sat: 1.20, hueSpeed: 0.038, gamma: 1.36, maxDpr: 1.5
   });
 
   let mode = 'demo';
@@ -31,11 +31,13 @@
   let micStream = null;
   let activeUrl = null;
   let frequencyBins = null;
+  let waveform = null;
   let toastTimer;
   const player = $('player');
-  const smoothed = { bass: 0, mid: 0, high: 0 };
-  const setting = { sensitivity: 1.25, intensity: .70, speed: .24 };
+  const smoothed = { loudness: 0, bass: 0, mid: 0, high: 0 };
+  const setting = { sensitivity: 1.25, intensity: .85, speed: .24 };
   const meters = {
+    loudness: [$('loudness-fill'), $('loudness-value')],
     bass: [$('bass-fill'), $('bass-value')],
     mid: [$('mid-fill'), $('mid-value')],
     high: [$('high-fill'), $('high-value')]
@@ -80,6 +82,7 @@
       analyser.minDecibels = -95;
       analyser.maxDecibels = -20;
       frequencyBins = new Uint8Array(analyser.frequencyBinCount);
+      waveform = new Float32Array(analyser.fftSize);
     }
     if (ctx.state !== 'running') await ctx.resume();
     return ctx;
@@ -158,10 +161,23 @@
     return clamp(Math.pow(gated, .82) * setting.sensitivity);
   }
 
+  // Time-domain RMS represents overall loudness, not a sum of spectral bins.
+  // Gentle gating, compression, and an envelope make quiet music perceptible
+  // without allowing sudden peaks to change the metaball topology.
+  function overallLoudness() {
+    analyser.getFloatTimeDomainData(waveform);
+    let sum = 0;
+    for (let i = 0; i < waveform.length; i++) sum += waveform[i] * waveform[i];
+    const rms = Math.sqrt(sum / waveform.length);
+    return clamp(Math.pow(clamp((rms - .012) / .22), .65) * setting.sensitivity);
+  }
+
   function spectrum() {
-    if (!analyser || !frequencyBins || ctx?.state !== 'running') return { bass: 0, mid: 0, high: 0 };
+    if (!analyser || !frequencyBins || !waveform || ctx?.state !== 'running')
+      return { loudness: 0, bass: 0, mid: 0, high: 0 };
     analyser.getByteFrequencyData(frequencyBins);
     return {
+      loudness: overallLoudness(),
       bass: energyBetween(35, 180),
       mid: energyBetween(180, 1900),
       high: energyBetween(1900, 10000)
@@ -177,6 +193,7 @@
     const snare = Math.exp(-upbeat / .20);
     const hat = Math.exp(-((t + .03) % .165) / .055);
     return {
+      loudness: clamp(.14 + .67 * kick + .32 * snare),
       bass: clamp(.10 + .75 * kick + .08 * (Math.sin(t * 2.1) + 1)),
       mid: clamp(.15 + .34 * snare + .17 * (Math.sin(t * 2.8 - .6) + 1)),
       high: clamp(.15 + .53 * hat + .08 * Math.sin(t * 9) ** 2)
@@ -196,27 +213,31 @@
     const dt = clamp((now - last) / 1000, 0, .05);
     last = now;
     const raw = mode === 'demo' ? simulatedSpectrum((now - start) / 1000) : spectrum();
+    smoothed.loudness = envelope(smoothed.loudness, raw.loudness, dt, .045, .26);
     smoothed.bass = envelope(smoothed.bass, raw.bass, dt, .08, .32);
     smoothed.mid = envelope(smoothed.mid, raw.mid, dt, .18, .55);
     smoothed.high = envelope(smoothed.high, raw.high, dt, .025, .13);
 
+    const L = smoothed.loudness * setting.intensity;
     const B = smoothed.bass * setting.intensity;
     const M = smoothed.mid * setting.intensity;
     const H = smoothed.high * setting.intensity;
     // Keep the variation of radius small and do not animate merge or spread.
     glow.setParams({
-      size: PARAMS.size + .05 * B,
-      film: PARAMS.film + .085 * M,
-      hueOff: PARAMS.hueOff + .034 * M,
-      glow: PARAMS.glow + 1.12 * H,
-      fringe: PARAMS.fringe - .34 * H,
+      size: PARAMS.size + .070 * B,
+      film: PARAMS.film + .130 * M,
+      hueOff: PARAMS.hueOff + .055 * M,
+      glow: PARAMS.glow + 2.10 * L,
+      aura: 0.055 + .62 * L,
+      // Treble adjusts only a small rim detail; loudness drives the main light.
+      fringe: PARAMS.fringe - .18 * H,
       speed: setting.speed,
       merge: PARAMS.merge,
       spread: PARAMS.spread
     });
 
     if (!hasWebGL) {
-      document.documentElement.style.setProperty('--fallback-brightness', String(0.70 + (smoothed.bass + smoothed.high) * .5));
+      document.documentElement.style.setProperty('--fallback-brightness', String(0.70 + (smoothed.bass + smoothed.loudness) * .5));
     }
     if (now - lastUi > 65) {
       lastUi = now;
@@ -271,7 +292,7 @@
     });
   }
   $('reset-btn').addEventListener('click', () => {
-    const defaults = { sensitivity: 1.25, intensity: 70, speed: .24 };
+    const defaults = { sensitivity: 1.25, intensity: 85, speed: .24 };
     for (const [name, value] of Object.entries(defaults)) {
       $(name).value = String(value);
       $(name).dispatchEvent(new Event('input'));
