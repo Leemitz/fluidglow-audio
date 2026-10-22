@@ -35,7 +35,7 @@
   let toastTimer;
   const player = $('player');
   const smoothed = { loudness: 0, bass: 0, mid: 0, high: 0 };
-  const setting = { sensitivity: 1.25, intensity: .85, speed: .24 };
+  const setting = { sensitivity: 1.25, intensity: .85, speed: .24, wave: 1 };
   const meters = {
     loudness: [$('loudness-fill'), $('loudness-value')],
     bass: [$('bass-fill'), $('bass-value')],
@@ -110,6 +110,7 @@
       $('track-name').textContent = file.name;
       $('track-detail').textContent = '本地音频 · 浏览器实时 FFT 分析';
       activate('file');
+      resetOnsetDetector();
       await player.play();
       $('play-btn').textContent = '❚❚';
       status('你的音乐正在驱动液滴的呼吸与光泽');
@@ -124,7 +125,7 @@
   async function useMicrophone() {
     if (mode === 'mic') {
       stopMicrophone();
-      activate('demo');
+      activate('demo'); resetOnsetDetector();
       status('体验模式运行中 · 选择音乐来驱动画面');
       return;
     }
@@ -137,6 +138,7 @@
       micSource = ctx.createMediaStreamSource(stream);
       micSource.connect(analyser);
       activate('mic');
+      resetOnsetDetector();
       status('正在通过麦克风捕捉周围声音');
       toast('麦克风已连接，音频不会上传');
     } catch (error) {
@@ -206,13 +208,75 @@
     return current + (target - current) * (1 - Math.exp(-dt / tau));
   }
 
+  // Beat detection: fast vs slow bass-weighted envelope with a rising-edge
+  // threshold + refractory period. Sustained bass cannot continuously re-hit.
+  const beat = { fast: 0, slow: 0, previous: 0, lastAt: -Infinity,
+    demoStep: -1, count: 0, flash: 0 };
+  const waves = { x1: 0, v1: 0, x2: 0, v2: 0 };
+  let elapsed = 0;
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion:reduce)').matches;
+
+  function resetOnsetDetector() {
+    beat.fast = 0; beat.slow = 0; beat.previous = 0;
+    beat.lastAt = -Infinity; beat.demoStep = -1;
+  }
+
+  function strike(strength = 1) {
+    const hit = clamp(strength, .25, 1.35);
+    // Impulse changes VELOCITY, never shape/position instantly.
+    waves.v1 = clamp(waves.v1 + 12.5 * hit, -16, 16);
+    waves.v2 = clamp(waves.v2 - 8.2 * hit, -12, 12);
+    beat.flash = 1;
+    beat.count += 1;
+  }
+
+  function detectBeat(raw, dt, nowSeconds) {
+    if (mode === 'demo') {
+      const step = Math.floor(elapsed / .66);
+      if (beat.demoStep !== step) {
+        beat.demoStep = step;
+        strike(.88);
+      }
+      return;
+    }
+    if (mode === 'file' && player.paused) return;
+    if (mode !== 'file' && mode !== 'mic') return;
+    const drive = clamp(raw.bass * .80 + raw.mid * .20);
+    beat.fast = envelope(beat.fast, drive, dt, .025, .065);
+    beat.slow = envelope(beat.slow, drive, dt, .28, .42);
+    const novelty = Math.max(0, beat.fast - beat.slow);
+    const threshold = .070 + .035 * beat.slow;
+    if (novelty > threshold && beat.previous <= threshold &&
+        drive > .18 && nowSeconds - beat.lastAt > .23) {
+      beat.lastAt = nowSeconds;
+      strike(clamp(.48 + (novelty - threshold) * 2.8, .48, 1.12));
+    }
+    beat.previous = novelty;
+  }
+
+  function simulateElasticWaves(dt) {
+    // Fixed micro-steps keep both damped spring modes stable at varied FPS.
+    const steps = Math.max(1, Math.ceil(dt / (1 / 180)));
+    const h = dt / steps;
+    for (let i = 0; i < steps; i++) {
+      waves.v1 += (-19 * 19 * waves.x1 - 7.8 * waves.v1) * h;
+      waves.x1 += waves.v1 * h;
+      waves.v2 += (-29 * 29 * waves.x2 - 11.5 * waves.v2) * h;
+      waves.x2 += waves.v2 * h;
+    }
+  }
+
   const start = performance.now();
   let last = start;
   let lastUi = 0;
   function animate(now) {
     const dt = clamp((now - last) / 1000, 0, .05);
     last = now;
-    const raw = mode === 'demo' ? simulatedSpectrum((now - start) / 1000) : spectrum();
+    elapsed += dt;
+    const raw = mode === 'demo' ? simulatedSpectrum(elapsed) : spectrum();
+    if (!reduceMotion) detectBeat(raw, dt, now / 1000);
+    simulateElasticWaves(dt);
+    beat.flash *= Math.exp(-dt / .16);
     smoothed.loudness = envelope(smoothed.loudness, raw.loudness, dt, .045, .26);
     smoothed.bass = envelope(smoothed.bass, raw.bass, dt, .08, .32);
     smoothed.mid = envelope(smoothed.mid, raw.mid, dt, .18, .55);
@@ -229,6 +293,8 @@
       hueOff: PARAMS.hueOff + .055 * M,
       glow: PARAMS.glow + 2.10 * L,
       aura: 0.055 + .62 * L,
+      waveA: reduceMotion ? 0 : clamp(waves.x1 * .17 * setting.wave * setting.intensity, -.10, .10),
+      waveB: reduceMotion ? 0 : clamp(waves.x2 * .16 * setting.wave * setting.intensity, -.042, .042),
       // Treble adjusts only a small rim detail; loudness drives the main light.
       fringe: PARAMS.fringe - .18 * H,
       speed: setting.speed,
@@ -241,6 +307,8 @@
     }
     if (now - lastUi > 65) {
       lastUi = now;
+      $('beat-lamp').style.setProperty('--beat-flash', beat.flash.toFixed(3));
+      $('beat-count').textContent = String(beat.count).padStart(3, '0');
       for (const [key, elements] of Object.entries(meters)) {
         const percent = Math.round(smoothed[key] * 100);
         elements[0].style.width = `${percent}%`;
@@ -257,7 +325,7 @@
 
   // Player and source controls.
   $('demo-btn').addEventListener('click', () => {
-    stopAudio(); activate('demo');
+    stopAudio(); activate('demo'); resetOnsetDetector();
     status('体验模式运行中（模拟节奏，无音频）');
     toast('已切换到无声节奏演示');
   });
@@ -284,15 +352,20 @@
     }
   });
 
-  for (const id of ['sensitivity', 'intensity', 'speed']) {
+  $('test-wave-btn').addEventListener('click', () => {
+    if (reduceMotion) { toast('系统已启用减少动态效果，弹性波暂停'); return; }
+    strike(1);
+    toast('已施加一次测试冲击 · 观察弹性回弹');
+  });
+  for (const id of ['sensitivity', 'intensity', 'speed', 'wave']) {
     $(id).addEventListener('input', event => {
       const value = Number(event.target.value);
-      setting[id] = id === 'intensity' ? value / 100 : value;
-      $(id + '-out').textContent = id === 'intensity' ? `${value}%` : id === 'sensitivity' ? `${value.toFixed(2)}×` : value.toFixed(2);
+      setting[id] = (id === 'intensity' || id === 'wave') ? value / 100 : value;
+      $(id + '-out').textContent = (id === 'intensity' || id === 'wave') ? `${value}%` : id === 'sensitivity' ? `${value.toFixed(2)}×` : value.toFixed(2);
     });
   }
   $('reset-btn').addEventListener('click', () => {
-    const defaults = { sensitivity: 1.25, intensity: 85, speed: .24 };
+    const defaults = { sensitivity: 1.25, intensity: 85, speed: .24, wave: 100 };
     for (const [name, value] of Object.entries(defaults)) {
       $(name).value = String(value);
       $(name).dispatchEvent(new Event('input'));
@@ -328,7 +401,7 @@
   });
 
   if (window.matchMedia?.('(prefers-reduced-motion:reduce)').matches) {
-    status('系统已开启减少动态效果；可以在系统设置中调整');
+    status('系统已开启减少动态效果；弹性波被禁用');
   }
   if (!hasWebGL) {
     status('当前浏览器无法启用 WebGL，显示简化预览效果');
