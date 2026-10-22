@@ -19,7 +19,7 @@
     <aside class="panel" id="panel">
       <div class="eyebrow"><span class="accent-dash"></span> GENERATIVE AUDIO EXPERIMENT</div>
       <h1>让声音<br><em>拥有形状。</em></h1>
-      <p class="intro">频率不控制液滴的轨迹，而是让它呼吸、流动、发光。<br>每一个瞬间，都是音乐留下的涟漪。</p>
+      <p class="intro">音乐不改变液滴的轨迹；低音让它呼吸，整体响度让它发光。<br>每一个瞬间，都是音乐留下的涟漪。</p>
 
       <section class="control-section" aria-labelledby="source-heading">
         <div class="section-head"><h2 id="source-heading">音频输入</h2><span class="section-index">01 / SOURCE</span></div>
@@ -39,15 +39,16 @@
 
       <section class="control-section" aria-labelledby="response-heading">
         <div class="section-head"><h2 id="response-heading">声音映射</h2><span class="section-index">02 / RESPONSE</span></div>
+        <div class="band-row loud-row"><div class="band-label"><span class="band-glyph loud-glyph">✷</span><div><strong>LOUD <span>整体响度</span></strong><small>高光与柔和光晕 / RMS</small></div></div><div class="meter"><span id="loudness-fill"></span></div><span class="band-num" id="loudness-value">00</span></div>
         <div class="band-row"><div class="band-label"><span class="band-glyph bass-glyph">◉</span><div><strong>BASS <span>低频</span></strong><small>柔和呼吸 / SIZE</small></div></div><div class="meter"><span id="bass-fill"></span></div><span class="band-num" id="bass-value">00</span></div>
         <div class="band-row"><div class="band-label"><span class="band-glyph mid-glyph">◌</span><div><strong>MID <span>中频</span></strong><small>虹彩流动 / FILM</small></div></div><div class="meter"><span id="mid-fill"></span></div><span class="band-num" id="mid-value">00</span></div>
-        <div class="band-row"><div class="band-label"><span class="band-glyph high-glyph">✧</span><div><strong>HIGH <span>高频</span></strong><small>边缘光泽 / GLOW</small></div></div><div class="meter"><span id="high-fill"></span></div><span class="band-num" id="high-value">00</span></div>
+        <div class="band-row"><div class="band-label"><span class="band-glyph high-glyph">✧</span><div><strong>HIGH <span>高频</span></strong><small>细微边缘质感 / FRINGE</small></div></div><div class="meter"><span id="high-fill"></span></div><span class="band-num" id="high-value">00</span></div>
       </section>
 
       <section class="control-section settings" aria-labelledby="tune-heading">
         <div class="section-head"><h2 id="tune-heading">微调工作台</h2><span class="section-index">03 / TUNING</span></div>
         <label class="slider-row"><span>响应灵敏度 <output id="sensitivity-out">1.25×</output></span><input id="sensitivity" type="range" min="0.5" max="3" step="0.05" value="1.25"></label>
-        <label class="slider-row"><span>视觉响应幅度 <output id="intensity-out">70%</output></span><input id="intensity" type="range" min="0" max="100" step="1" value="70"></label>
+        <label class="slider-row"><span>视觉响应幅度 <output id="intensity-out">85%</output></span><input id="intensity" type="range" min="0" max="100" step="1" value="85"></label>
         <label class="slider-row"><span>运动速度 <output id="speed-out">0.24</output></span><input id="speed" type="range" min="0" max="0.65" step="0.01" value="0.24"></label>
         <div class="stability-note"><span class="lock-icon">◇</span><div><strong>稳定融合保护 <span class="stable">ON</span></strong><p>MERGE 0.17 · SPREAD 1.70 保持固定，避免音乐导致液滴接近时突然吸附。</p></div></div>
         <button id="reset-btn" class="reset-btn">↺ 恢复默认设置</button>
