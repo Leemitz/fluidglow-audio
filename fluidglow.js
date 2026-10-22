@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   var DEFAULTS = {
-    speed: 0.24, glow: 2.06, aura: 0.055, fringe: 5.85, edge: 0.002,
+    speed: 0.24, glow: 2.06, aura: 0.055, waveA: 0.0, waveB: 0.0, fringe: 5.85, edge: 0.002,
     sat: 1.20, hueSpeed: 0.04, hueOff: 0.00,
     size: 1.35, spread: 1.70, incline: 0.42, body: 0.00,
     film: 0.30, light: 1.00, gamma: 1.60, merge: 0.17,
@@ -16,11 +16,17 @@
   var FRAG = [
     'precision highp float;',
     'uniform vec2 u_res;uniform float u_time;',
-    'uniform float u_glow,u_aura,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
+    'uniform float u_glow,u_aura,u_waveA,u_waveB,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
     'vec3 hue(float h){vec3 c=abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0;return clamp(c,0.0,1.0);}',
     'vec2 C[4];float R[4];',
     'float smin(float a,float b,float k){float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);return mix(b,a,h)-k*h*(1.0-h);}',
-    'float scene(vec2 p){float k=max(u_merge,1e-4);float d=length(p-C[0])-R[0];for(int i=1;i<4;i++){d=smin(d,length(p-C[i])-R[i],k);}return d;}',
+    // Deform each droplet BEFORE SDF smooth-union. Phase offsets keep four bodies
+    // organic rather than moving in lockstep. Displacement stays bounded as
+    // a fraction of radius, without shifting the droplet centres.
+    'float dropSdf(vec2 p,int i){vec2 q=p-C[i];float a=atan(q.y,q.x);float id=float(i);',
+    '  float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13);',
+    '  return length(q)-R[i]*(1.0+clamp(ripple,-0.12,0.12));}',
+    'float scene(vec2 p){float k=max(u_merge,1e-4);float d=dropSdf(p,0);for(int i=1;i<4;i++){d=smin(d,dropSdf(p,i),k);}return d;}',
     'void main(){',
     '  vec2 uv=(gl_FragCoord.xy-0.5*u_res)/min(u_res.x,u_res.y);',
     '  uv=(uv-vec2(u_posX,u_posY))/max(u_zoom,0.05);',
