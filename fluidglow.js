@@ -23,10 +23,16 @@
     // Deform each droplet BEFORE SDF smooth-union. Phase offsets keep four bodies
     // organic rather than moving in lockstep. Displacement stays bounded as
     // a fraction of radius, without shifting the droplet centres.
-    'float dropSdf(vec2 p,int i){vec2 q=p-C[i];float a=atan(q.y,q.x);float id=float(i);',
+    // Constant indices avoid WebGL 1 array indexing restrictions in shader helpers.
+    'float dropSdf(vec2 p,vec2 center,float radius,float id){',
+    '  vec2 q=p-center;float a=atan(q.y,q.x);',
     '  float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13);',
-    '  return length(q)-R[i]*(1.0+clamp(ripple,-0.12,0.12));}',
-    'float scene(vec2 p){float k=max(u_merge,1e-4);float d=dropSdf(p,0);for(int i=1;i<4;i++){d=smin(d,dropSdf(p,i),k);}return d;}',
+    '  return length(q)-radius*(1.0+clamp(ripple,-0.12,0.12));}',
+    'float scene(vec2 p){float k=max(u_merge,1e-4);',
+    '  float d=dropSdf(p,C[0],R[0],0.0);',
+    '  d=smin(d,dropSdf(p,C[1],R[1],1.0),k);',
+    '  d=smin(d,dropSdf(p,C[2],R[2],2.0),k);',
+    '  d=smin(d,dropSdf(p,C[3],R[3],3.0),k);return d;}',
     'void main(){',
     '  vec2 uv=(gl_FragCoord.xy-0.5*u_res)/min(u_res.x,u_res.y);',
     '  uv=(uv-vec2(u_posX,u_posY))/max(u_zoom,0.05);',
@@ -59,6 +65,11 @@
     '  gl_FragColor=vec4(col,1.0);',
     '}'
   ].join('\n');
+  // Last-known-safe fallback: only the ripple is disabled.
+  var FRAG_SAFE = FRAG.replace(
+    'float ripple=u_waveA*sin(3.0*a+id*1.71)+u_waveB*sin(5.0*a-id*1.13);',
+    'float ripple=0.0;'
+  );
   var VERT = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.0,1.0);}';
 
   function FluidGlow(options) {
@@ -78,18 +89,56 @@
     var gl = canvas.getContext('webgl', { antialias: true });
     if (!gl) {
       canvas.style.background = '#000';
-      return { setParams: function () {}, destroy: function () {} };
+      return { ready: false, error: 'WebGL unavailable', setParams: function () {}, destroy: function () {} };
     }
     function compile(type, src) {
       var s = gl.createShader(type);
+      if (!s) throw new Error('Unable to create shader');
       gl.shaderSource(s, src); gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error('FluidGlow:', gl.getShaderInfoLog(s));
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        var log = gl.getShaderInfoLog(s) || 'Unknown GLSL compilation error';
+        gl.deleteShader(s);
+        throw new Error(log);
+      }
       return s;
     }
-    var prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
-    gl.linkProgram(prog); gl.useProgram(prog);
+    function createProgram(fragmentSource) {
+      var vertex = compile(gl.VERTEX_SHADER, VERT);
+      var fragment;
+      try { fragment = compile(gl.FRAGMENT_SHADER, fragmentSource); }
+      catch (error) { gl.deleteShader(vertex); throw error; }
+      var program = gl.createProgram();
+      gl.attachShader(program, vertex);
+      gl.attachShader(program, fragment);
+      gl.linkProgram(program);
+      gl.deleteShader(vertex);
+      gl.deleteShader(fragment);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        var log = gl.getProgramInfoLog(program) || 'Unknown GLSL link error';
+        gl.deleteProgram(program);
+        throw new Error(log);
+      }
+      return program;
+    }
+    var prog, usingSafeShader = false;
+    try {
+      prog = createProgram(FRAG);
+    } catch (error) {
+      console.error('FluidGlow: elastic shader failed, trying safe shader:', error);
+      try {
+        prog = createProgram(FRAG_SAFE);
+        usingSafeShader = true;
+        console.warn('FluidGlow: safe shader loaded; animation ripple disabled.');
+      } catch (fallbackError) {
+        console.error('FluidGlow: cannot render:', fallbackError);
+        return {
+          ready: false,
+          error: String(fallbackError.message || fallbackError),
+          setParams: function () {}, destroy: function () {}
+        };
+      }
+    }
+    gl.useProgram(prog);
     var buf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -120,7 +169,7 @@
     }
     raf = requestAnimationFrame(frame);
     return {
-      params: P,
+      ready: true, safeMode: usingSafeShader, params: P,
       setParams: function (next) { for (var n in next) if (n in P) P[n] = next[n]; },
       destroy: function () {
         alive = false;
