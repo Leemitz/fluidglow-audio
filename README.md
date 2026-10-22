@@ -71,3 +71,10 @@ Browser regression: Chromium with real ANGLE/SwiftShader WebGL showed no visible
 - **Safety:** keep WebGL 1 constant-index SDF calls, compile/link validation and safe shader fallback. Stage height stays bounded while the inspector is expanded. Static asset versions are `1.3.0`.
 
 Synthetic kick/snare comparison during local testing (one 6-second clip with 11 impulses): old detector registered around 3 events; v1.3.0 registered around 9. Counts are illustrative and depend on the audio mix and playback timing.
+
+## v1.4.0 — black gold palettes and treble illumination
+
+- `glow` and `aura` now use high-frequency energy (1900–10000 Hz), with 30 ms attack / 190 ms release and perceptual compression. RMS is still displayed but no longer drives illumination.
+- Shader palette uniforms `u_paletteA/B/C`, `u_paletteBg` and `u_paletteMode` tint oil-film, rim highlights, and glow. Palette changes crossfade over ~400 ms.
+- Switchable palettes: Champagne Noir, Rose Obsidian, Gilded Onyx, Pearl Champagne, Bronze Rosé, and Original Prism for comparison.
+- Existing beat detection, elastic waves, autonomous surface motion, and full FluidGlow manual parameter panel are preserved; colors never control merge or spread.
