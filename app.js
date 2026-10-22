@@ -15,13 +15,15 @@
     size: 1.35, film: 0.30, glow: 2.06, fringe: 5.85,
     hueOff: 0, speed: 0.24, merge: 0.17, spread: 1.70
   });
-  const hasWebGL = !!$('fluid-canvas').getContext('webgl');
-  if (!hasWebGL) document.body.classList.add('no-webgl');
+  // A context can exist even when the shader program failed to compile.
   const glow = FluidGlow({
     canvas: $('fluid-canvas'), ...PARAMS,
     zoom: window.innerWidth < 760 ? 1.14 : 1.24,
     sat: 1.20, hueSpeed: 0.038, gamma: 1.36, maxDpr: 1.5
   });
+  const hasWebGL = glow.ready === true;
+  if (!hasWebGL) document.body.classList.add('no-webgl');
+  if (glow.safeMode) document.body.classList.add('shader-safe-mode');
 
   let mode = 'demo';
   let ctx = null;
@@ -403,9 +405,19 @@
   if (window.matchMedia?.('(prefers-reduced-motion:reduce)').matches) {
     status('系统已开启减少动态效果；弹性波被禁用');
   }
-  if (!hasWebGL) {
-    status('当前浏览器无法启用 WebGL，显示简化预览效果');
-    toast('当前环境未启用 WebGL；推荐使用 Chrome / Safari 并开启硬件加速');
+  if (glow.safeMode) {
+    status('已自动切换兼容模式：油滴正常显示，弹性波在此设备上暂停');
+    toast('设备 Shader 兼容性限制：已自动恢复稳定液滴');
   }
+  if (!hasWebGL) {
+    status('Shader 初始化失败，已显示简化预览。请查看浏览器控制台错误');
+    toast('无法初始化 WebGL Shader，已启用简化预览');
+  }
+  $('fluid-canvas').addEventListener('webglcontextlost', event => {
+    event.preventDefault();
+    document.body.classList.add('no-webgl');
+    status('显卡上下文暂时丢失，已启用简化预览');
+  });
+  $('fluid-canvas').addEventListener('webglcontextrestored', () => window.location.reload());
   requestAnimationFrame(animate);
 })();
