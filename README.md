@@ -45,3 +45,17 @@ The elastic ripples are a visual SDF deformation, not a full fluid simulation. V
 
 - `fluidglow.js`: based on original source by **Stéphane Drozdz** under MIT. See `LICENSE` and [upstream](https://github.com/stephanezdz/fluidglow).
 - `app.js`, `styles.css`, `index.html`: custom music-reactive application and interface created for this project. Distributed under the same MIT license.
+
+## v1.2.1 shader visibility regression fix
+
+**Root cause**: The v1.2 GLSL ES 1.00 shader indexed the C/R arrays with the function parameter `i` from `dropSdf(vec2 p, int i)`. Browser WebGL compilation failed with `'i' : Index expression can only contain const or loop symbols`. Rendering continued with an invalid program, leaving the canvas blank.
+
+Fixes:
+- Unroll the four metaball SDF calls with constant indices and pass center, radius, and numeric phase directly to the helper.
+- Check both GLSL compilation and program link status. When the elastic-wave shader fails, try a stable non-wave version.
+- If WebGL cannot render at all, show an explicit fallback/status rather than leaving an unexplained black canvas; recover from WebGL context restoration.
+- Bust cached script/style URLs to `?v=1.2.1` so GitHub Pages clients do not mix versions.
+
+The bass/mid/high/RMS audio mapping, drum onset detection, damped wave integration, and constant merge/spread settings remain unchanged.
+
+Browser regression: Chromium with real ANGLE/SwiftShader WebGL showed no visible liquid and console GLSL errors in v1.2; v1.2.1 rendered liquid and exposed no compilation errors.
