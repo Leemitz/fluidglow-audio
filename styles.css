@@ -15,3 +15,11 @@
 @media(max-width:760px){.fallback-visual span{width:65vw}}
 /* RMS loudness has its own clearly identified visual channel. */
 .loud-glyph{color:#b6ecff}.loud-row .meter span{background:linear-gradient(90deg,#79e4dc,#caabfa)}
+
+/* Beat indicator highlights new impulses, not sustained bass. */
+.beat-feedback{display:flex;align-items:center;gap:9px;padding:12px 10px;border:1px solid rgba(121,228,220,.18);border-radius:9px;background:rgba(121,228,220,.035);margin:-1px 0 4px;font-size:10px;letter-spacing:.08em;color:#bec8d4}
+.beat-feedback small{font-size:9px;letter-spacing:0;color:#82939f;margin-left:5px}
+.beat-feedback strong{margin-left:auto;font-size:12px;color:#b3f2e4;font-variant-numeric:tabular-nums;letter-spacing:.1em}
+.beat-lamp{--beat-flash:0;flex:none;width:10px;height:10px;border-radius:50%;background:rgba(121,228,220,calc(.23 + .77 * var(--beat-flash)));box-shadow:0 0 calc(2px + 16px * var(--beat-flash)) rgba(121,228,220,calc(.08 + .88 * var(--beat-flash)))}
+.test-wave-btn{border:1px solid rgba(121,228,220,.25);background:rgba(121,228,220,.045);color:#abebdf;border-radius:8px;padding:10px 12px;margin-top:-7px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:11px}
+.test-wave-btn:hover{background:rgba(121,228,220,.12)}.test-wave-btn small{font-size:9px;color:#839f9b}.caption-version{font-size:9px;vertical-align:middle;letter-spacing:0;color:#79e4dc}
