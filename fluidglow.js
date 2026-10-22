@@ -13,11 +13,31 @@
     film: 0.30, light: 1.00, gamma: 1.60, merge: 0.17,
     zoom: 1.05, posX: 0.00, posY: 0.00, posZ: -0.02
   };
+  // Cohesive metal palette. Scalar parameters and music mapping stay separate.
+  var INITIAL_PALETTE = {
+    a: [0.957,0.890,0.769], b: [0.820,0.675,0.471],
+    c: [0.659,0.490,0.392], bg: [0.024,0.020,0.024], mode: 1
+  };
+  function copyPalette(value) {
+    return {
+      a:(value.a || INITIAL_PALETTE.a).slice(),
+      b:(value.b || INITIAL_PALETTE.b).slice(),
+      c:(value.c || INITIAL_PALETTE.c).slice(),
+      bg:(value.bg || INITIAL_PALETTE.bg).slice(),
+      mode:value.mode === undefined ? 1 : value.mode
+    };
+  }
   var FRAG = [
     'precision highp float;',
     'uniform vec2 u_res;uniform float u_time,u_motionTime;',
     'uniform float u_glow,u_aura,u_waveA,u_waveB,u_surfaceMotion,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
+    'uniform vec3 u_paletteA,u_paletteB,u_paletteC,u_paletteBg;uniform float u_paletteMode;',
     'vec3 hue(float h){vec3 c=abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0;return clamp(c,0.0,1.0);}',
+    'vec3 metalPalette(float phase){',
+    '  float a=pow(0.5+0.5*cos(6.2831853*(phase-0.00)),2.4)+0.015;',
+    '  float b=pow(0.5+0.5*cos(6.2831853*(phase-0.34)),2.4)+0.015;',
+    '  float c=pow(0.5+0.5*cos(6.2831853*(phase-0.68)),2.4)+0.015;',
+    '  return (u_paletteA*a+u_paletteB*b+u_paletteC*c)/(a+b+c);}',
     'vec2 C[4];float R[4];',
     'float smin(float a,float b,float k){float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);return mix(b,a,h)-k*h*(1.0-h);}',
     // Deform each droplet BEFORE SDF smooth-union. Phase offsets keep four bodies
@@ -57,7 +77,8 @@
     '  float fres=inside*pow(ep,u_fringe);',
     '  float ang=atan(n.y,n.x);',
     '  float hh=fract(ang/6.28318+u_hueSpeed*t+u_hueOff);',
-    '  vec3 rc=hue(hh);rc=mix(vec3(dot(rc,vec3(0.333))),rc,u_sat);',
+    '  vec3 rc=mix(hue(hh),metalPalette(hh),clamp(u_paletteMode,0.0,1.0));',
+    '  rc=mix(vec3(dot(rc,vec3(0.333))),rc,u_sat);',
     '  vec2 L=normalize(vec2(-0.45,0.9));',
     '  float lit=mix(1.0,clamp(dot(n,L)*0.5+0.5,0.0,1.0),u_light);',
     '  vec3 col=rc*fres*lit*u_glow+inside*u_body*vec3(0.006,0.008,0.014);',
@@ -65,6 +86,7 @@
     '  float halo=exp(-max(D,0.0)*23.0)*(1.0-inside);',
     '  vec3 auraColor=mix(vec3(0.10,0.17,0.24),rc,0.78);',
     '  col+=u_aura*halo*auraColor*0.68;',
+    '  col+=u_paletteBg;',
     '  gl_FragColor=vec4(col,1.0);',
     '}'
   ].join('\n');
@@ -92,7 +114,7 @@
     var gl = canvas.getContext('webgl', { antialias: true });
     if (!gl) {
       canvas.style.background = '#000';
-      return { ready: false, error: 'WebGL unavailable', setParams: function () {}, destroy: function () {} };
+      return { ready: false, error: 'WebGL unavailable', setParams: function () {}, setPalette: function () {}, destroy: function () {} };
     }
     function compile(type, src) {
       var s = gl.createShader(type);
@@ -123,6 +145,8 @@
       }
       return program;
     }
+    var currentPalette = copyPalette(options.palette || INITIAL_PALETTE);
+    var targetPalette = copyPalette(currentPalette);
     var prog, usingSafeShader = false;
     try {
       prog = createProgram(FRAG);
@@ -137,7 +161,7 @@
         return {
           ready: false,
           error: String(fallbackError.message || fallbackError),
-          setParams: function () {}, destroy: function () {}
+          setParams: function () {}, setPalette: function () {}, destroy: function () {}
         };
       }
     }
@@ -151,6 +175,13 @@
     var uRes = gl.getUniformLocation(prog, 'u_res'),
         uTime = gl.getUniformLocation(prog, 'u_time'),
         uMotionTime = gl.getUniformLocation(prog, 'u_motionTime'), U = {};
+    var paletteUniforms = {
+      a:gl.getUniformLocation(prog, 'u_paletteA'),
+      b:gl.getUniformLocation(prog, 'u_paletteB'),
+      c:gl.getUniformLocation(prog, 'u_paletteC'),
+      bg:gl.getUniformLocation(prog, 'u_paletteBg'),
+      mode:gl.getUniformLocation(prog, 'u_paletteMode')
+    };
     for (k in DEFAULTS) if (k !== 'speed') U[k] = gl.getUniformLocation(prog, 'u_' + k);
     var maxDpr = options.maxDpr || 1.5;
     function resize() {
@@ -165,6 +196,19 @@
     function frame(now) {
       if (!alive) return;
       var dt = Math.min((now - last) / 1000, 0.05); last = now; acc += dt * P.speed; naturalTime += dt;
+      // Fade between presets without changing the SDF geometry.
+      var ease = 1.0 - Math.exp(-dt / 0.40);
+      for (var colorKey of ['a','b','c','bg']) {
+        for (var channel=0;channel<3;channel++) {
+          currentPalette[colorKey][channel] +=
+            (targetPalette[colorKey][channel]-currentPalette[colorKey][channel])*ease;
+        }
+        var v=currentPalette[colorKey];
+        if (paletteUniforms[colorKey] !== null)
+          gl.uniform3f(paletteUniforms[colorKey],v[0],v[1],v[2]);
+      }
+      currentPalette.mode += (targetPalette.mode-currentPalette.mode)*ease;
+      if (paletteUniforms.mode !== null) gl.uniform1f(paletteUniforms.mode,currentPalette.mode);
       gl.uniform2f(uRes, canvas.width, canvas.height);
       gl.uniform1f(uTime, reduce ? 8.0 : acc);
       if (uMotionTime !== null) gl.uniform1f(uMotionTime, naturalTime);
@@ -176,6 +220,7 @@
     return {
       ready: true, safeMode: usingSafeShader, params: P,
       setParams: function (next) { for (var n in next) if (n in P) P[n] = next[n]; },
+      setPalette: function (next) { targetPalette = copyPalette(next); },
       destroy: function () {
         alive = false;
         if (raf) cancelAnimationFrame(raf);
