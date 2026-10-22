@@ -1,4 +1,4 @@
-# FluidGlow Audio — Phase 02 (v1.2)
+# FluidGlow Audio — Phase 03 (v1.3.0)
 
 A music-reactive iridescent metaball visualizer built on [FluidGlow](https://github.com/stephanezdz/fluidglow). Zero runtime dependencies: **WebGL + Web Audio API**, just HTML, CSS and JavaScript.
 
@@ -59,3 +59,15 @@ Fixes:
 The bass/mid/high/RMS audio mapping, drum onset detection, damped wave integration, and constant merge/spread settings remain unchanged.
 
 Browser regression: Chromium with real ANGLE/SwiftShader WebGL showed no visible liquid and console GLSL errors in v1.2; v1.2.1 rendered liquid and exposed no compilation errors.
+
+
+## v1.3.0 — Drum detection, autonomous shape, and complete editor
+
+- **Why real beats were missed in v1.2:** FFT smoothing (0.62), a gate on frequency-band energy, and a fixed minimum low-band drive (`drive > 0.18`) eliminated many audible but short percussion attacks, especially in mastered material.
+- **Detection fix:** positive weighted spectral flux in the original ungated FFT bins at 35–2600 Hz; the noise floor follows each track using a slow baseline, hysteresis, a 200 ms cooldown, and user-tunable beat sensitivity. The panel displays `FLUX / threshold` for diagnosis. This is a transient detector, not a tempo or beat-grid tracker.
+- **Autonomous `u_surfaceMotion`:** a dedicated on/off switch smoothly enables slow SDF harmonics using an independent GPU time uniform. **No FFT frequency, loudness or beat parameter** feeds this effect.
+- **Elastic wave switch:** separately enables/disables existing damped beat-driven surface waves. The manual test strike continues to work when enabled.
+- **FluidGlow module inspector:** all 20 baseline sliders are adjustable, arranged by shape, optics and motion; `waveA / waveB` are live read-only outputs, and `surfaceMotion` is controlled by its switch. Audio offsets are applied on top of manual baselines. Manual `merge / spread` controls can change how droplets join, but are never mapped to music.
+- **Safety:** keep WebGL 1 constant-index SDF calls, compile/link validation and safe shader fallback. Stage height stays bounded while the inspector is expanded. Static asset versions are `1.3.0`.
+
+Synthetic kick/snare comparison during local testing (one 6-second clip with 11 impulses): old detector registered around 3 events; v1.3.0 registered around 9. Counts are illustrative and depend on the audio mix and playback timing.
