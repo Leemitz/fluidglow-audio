@@ -1,4 +1,4 @@
-# FluidGlow Audio — Phase 01
+# FluidGlow Audio — Phase 02 (v1.2)
 
 A music-reactive iridescent metaball visualizer built on [FluidGlow](https://github.com/stephanezdz/fluidglow). Zero runtime dependencies: **WebGL + Web Audio API**, just HTML, CSS and JavaScript.
 
@@ -10,6 +10,9 @@ A music-reactive iridescent metaball visualizer built on [FluidGlow](https://git
 - FFT with distinct bands for bass (35–180 Hz), mid (180–1900 Hz), and high (1900–10000 Hz), plus actual **time-domain RMS loudness** (not FFT average).
 - Attack/release smoothing (loudness: 45/260 ms, bass: 80/320 ms, mid: 180/550 ms, high: 25/130 ms).
 - Overall RMS loudness → visible `glow` and soft outer `aura`; bass → gentle `size` breathing; mid → `film` and `hueOff`; high → subtle `fringe` detail only.
+- **Drum-like onset detection**: a fast/slow bass-weighted envelope contrast with rising-edge threshold, cooldown and impact strength estimation. Demo mode generates synthetic beat events; music and microphone mode analyze real sound.
+- **Damped elastic surface waves**: each beat changes the velocity of two spring oscillators, whose displacement smoothly deforms each droplet's GLSL signed distance with two angular harmonics and individual phase offsets. The ripple oscillates and decays instead of instantly jumping to a new silhouette.
+- Adjustable wave strength (0–160%), manual **Test Strike** button, and beat indicator/count. OS `prefers-reduced-motion` disables the waves.
 - The `merge` and `spread` topology parameters **never depend on audio**, which minimizes the abrupt neck changes observed when droplets approach.
 - Sliders for sensitivity, visual response, and independent orbital motion speed.
 - Audio stays entirely on the user's machine. No uploads, analytics, cookies, or third-party scripts.
@@ -34,9 +37,9 @@ No build step, configuration files or third-party services are needed.
 
 ## Design notes
 
-Audio does not control orbital centers or the smooth-minimum merge threshold. Instead, the shader continuously evolves and the audio modifies its perceived energy (subtle radius pulsation, oil-film interference width/color, rim brightness and an outer aura). This v1.1 iteration switches primary luminance to time-domain RMS and adds a dedicated loudness meter. A corrected edge smoothstep avoids relying on undefined reversed-edge behavior. All incoming spectral energy passes through an attack/release exponential envelope using delta time.
+Audio does not control orbital centers or the smooth-minimum merge threshold. Instead, the shader continuously evolves and the audio modifies its perceived energy (subtle radius pulsation, oil-film interference width/color, rim brightness and an outer aura). The v1.1 iteration switched primary luminance to time-domain RMS and added a dedicated loudness meter. **v1.2** adds beat-triggered, damped surface deformation while retaining stable orbital centres and smooth-union threshold. A corrected edge smoothstep avoids relying on undefined reversed-edge behavior. All incoming spectral energy passes through an attack/release exponential envelope using delta time.
 
-This is **phase 1**. Liquid-surface standing waves, viscous body dynamics, and realistic physical merging are out of scope.
+The elastic ripples are a visual SDF deformation, not a full fluid simulation. Viscous flow and physical mass-conserving merging remain out of scope. Transient detection is heuristic; sensitivity will vary by recording and music style.
 
 ## Credits and license
 
