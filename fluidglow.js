@@ -7,7 +7,7 @@
 (function (root) {
   'use strict';
   var DEFAULTS = {
-    speed: 0.24, glow: 2.06, fringe: 5.85, edge: 0.002,
+    speed: 0.24, glow: 2.06, aura: 0.055, fringe: 5.85, edge: 0.002,
     sat: 1.20, hueSpeed: 0.04, hueOff: 0.00,
     size: 1.35, spread: 1.70, incline: 0.42, body: 0.00,
     film: 0.30, light: 1.00, gamma: 1.60, merge: 0.17,
@@ -16,7 +16,7 @@
   var FRAG = [
     'precision highp float;',
     'uniform vec2 u_res;uniform float u_time;',
-    'uniform float u_glow,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
+    'uniform float u_glow,u_aura,u_fringe,u_edge,u_sat,u_hueSpeed,u_hueOff,u_size,u_spread,u_incline,u_body,u_film,u_light,u_gamma,u_merge,u_zoom,u_posX,u_posY,u_posZ;',
     'vec3 hue(float h){vec3 c=abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0;return clamp(c,0.0,1.0);}',
     'vec2 C[4];float R[4];',
     'float smin(float a,float b,float k){float h=clamp(0.5+0.5*(b-a)/k,0.0,1.0);return mix(b,a,h)-k*h*(1.0-h);}',
@@ -36,7 +36,7 @@
     '  float D=scene(uv);float eps=0.0022;',
     '  vec2 n=normalize(vec2(scene(uv+vec2(eps,0.0))-scene(uv-vec2(eps,0.0)),',
     '                        scene(uv+vec2(0.0,eps))-scene(uv-vec2(0.0,eps)))+vec2(1e-6));',
-    '  float inside=smoothstep(u_edge,-u_edge,D);',
+    '  float inside=1.0-smoothstep(-u_edge,u_edge,D);',
     '  float filmDepth=max(u_film*u_size*0.16,1e-3);',
     '  float ep=clamp(1.0+D/filmDepth,0.0,1.0);',
     '  float fres=inside*pow(ep,u_fringe);',
@@ -47,6 +47,9 @@
     '  float lit=mix(1.0,clamp(dot(n,L)*0.5+0.5,0.0,1.0),u_light);',
     '  vec3 col=rc*fres*lit*u_glow+inside*u_body*vec3(0.006,0.008,0.014);',
     '  col=pow(max(col,0.0),vec3(u_gamma));',
+    '  float halo=exp(-max(D,0.0)*23.0)*(1.0-inside);',
+    '  vec3 auraColor=mix(vec3(0.10,0.17,0.24),rc,0.78);',
+    '  col+=u_aura*halo*auraColor*0.68;',
     '  gl_FragColor=vec4(col,1.0);',
     '}'
   ].join('\n');
