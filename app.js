@@ -11,6 +11,24 @@
   const clamp = (n, a = 0, b = 1) => Math.max(a, Math.min(b, n));
   const toClock = seconds => Number.isFinite(seconds) ?
     `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` : '0:00';
+  // Artist-picked sRGB black/gold presets; independent of audio analysis.
+  const PALETTES = [
+    {id:'champagne',name:'香槟黑金',en:'CHAMPAGNE NOIR',note:'温润香槟金 / 柔和玫瑰影',colors:['#F4E3C4','#D1AC78','#A87D64'],bg:'#060506'},
+    {id:'rose',name:'玫瑰鎏金',en:'ROSE OBSIDIAN',note:'粉铜反光 / 暗玫瑰黑',colors:['#F2C5B9','#C78B83','#AF8265'],bg:'#0A0609'},
+    {id:'royal',name:'曜石深金',en:'GILDED ONYX',note:'古典深金 / 黑曜石',colors:['#F0D49A','#B89453','#795434'],bg:'#070607'},
+    {id:'pearl',name:'月光香槟',en:'PEARL CHAMPAGNE',note:'淡香槟珍珠 / 浅玫瑰',colors:['#F6E8D1','#DBC1A0','#C49A8E'],bg:'#0A090A'},
+    {id:'bronze',name:'暮光玫瑰',en:'BRONZE ROSÉ',note:'香槟铜 / 暮色玫瑰金',colors:['#F3D2A7','#BF866D','#9A6157'],bg:'#080507'},
+    {id:'original',name:'原版虹彩',en:'ORIGINAL PRISM',note:'原始虹彩 / 对比模式',colors:['#79E4DC','#C38DEA','#E6AEB0'],bg:'#000000',mode:0}
+  ];
+  const toRgb = hex => [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255);
+  let selectedPalette = PALETTES[0];
+  function paletteUniforms(preset) {
+    return {
+      a:toRgb(preset.colors[0]),b:toRgb(preset.colors[1]),
+      c:toRgb(preset.colors[2]),bg:toRgb(preset.bg),
+      mode:preset.mode===0 ? 0 : 1
+    };
+  }
   // User-editable baseline; musical signals add bounded offsets.
   const PARAMS = {
     ...FluidGlow.defaults,
@@ -49,7 +67,7 @@
   const AUDIO_PARAMETERS = new Set(['size','glow','aura','film','hueOff','fringe']);
   // A context can exist even when the shader program failed to compile.
   const glow = FluidGlow({
-    canvas: $('fluid-canvas'), ...PARAMS, maxDpr: 1.5
+    canvas: $('fluid-canvas'), ...PARAMS, palette: paletteUniforms(selectedPalette), maxDpr: 1.5
   });
   const hasWebGL = glow.ready === true;
   if (!hasWebGL) document.body.classList.add('no-webgl');
@@ -345,20 +363,21 @@
     smoothed.loudness = envelope(smoothed.loudness, raw.loudness, dt, .045, .26);
     smoothed.bass = envelope(smoothed.bass, raw.bass, dt, .08, .32);
     smoothed.mid = envelope(smoothed.mid, raw.mid, dt, .18, .55);
-    smoothed.high = envelope(smoothed.high, raw.high, dt, .025, .13);
+    smoothed.high = envelope(smoothed.high, raw.high, dt, .030, .19);
 
-    const L = smoothed.loudness * setting.intensity;
+    // RMS remains a diagnostic meter; only high-frequency energy drives illumination.
     const B = smoothed.bass * setting.intensity;
     const M = smoothed.mid * setting.intensity;
-    const H = smoothed.high * setting.intensity;
+    // Compression improves audibility of short treble transients without changing geometry.
+    const H = Math.pow(smoothed.high, .72) * setting.intensity;
     // Keep the variation of radius small and do not animate merge or spread.
     glow.setParams({
       ...PARAMS,
       size: PARAMS.size + .070 * B,
       film: PARAMS.film + .130 * M,
       hueOff: PARAMS.hueOff + .055 * M,
-      glow: PARAMS.glow + 2.10 * L,
-      aura: PARAMS.aura + .62 * L,
+      glow: PARAMS.glow + 2.70 * H,
+      aura: PARAMS.aura + .90 * H,
       waveA: (setting.waveEnabled && !reduceMotion) ? clamp(waves.x1 * .17 * setting.wave * setting.intensity, -.10, .10) : 0,
       waveB: (setting.waveEnabled && !reduceMotion) ? clamp(waves.x2 * .16 * setting.wave * setting.intensity, -.042, .042) : 0,
       surfaceMotion: surfaceLevel,
@@ -444,6 +463,41 @@
 
   // Every base FluidGlow control is generated from one parameter schema.
   // Audio modulators add bounded offsets to the user-selected base values.
+  // Preset cards are built with textContent (no untrusted HTML).
+  function buildPalettePicker() {
+    const host = $('palette-grid');
+    if (!host) return;
+    for (const preset of PALETTES) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'palette-card';
+      card.dataset.palette = preset.id;
+      card.setAttribute('aria-pressed', String(preset === selectedPalette));
+      const swatch = document.createElement('span');
+      swatch.className = 'palette-swatch';
+      swatch.style.background = `radial-gradient(circle at 36% 33%,${preset.colors[0]} 2%,${preset.colors[1]} 27%,${preset.colors[2]} 48%,${preset.bg} 75%)`;
+      const meta = document.createElement('span');
+      meta.className = 'palette-meta';
+      const title = document.createElement('strong'); title.textContent = preset.name;
+      const subtitle = document.createElement('small'); subtitle.textContent = preset.en;
+      meta.append(title,subtitle);
+      card.append(swatch,meta);
+      card.title = preset.note;
+      card.addEventListener('click', () => {
+        selectedPalette = preset;
+        glow.setPalette(paletteUniforms(preset));
+        for (const el of host.querySelectorAll('.palette-card')) {
+          el.setAttribute('aria-pressed',String(el === card));
+        }
+        $('palette-note').textContent = preset.note;
+        toast('已切换配色：'+preset.name);
+      });
+      host.append(card);
+    }
+    $('palette-note').textContent = selectedPalette.note;
+  }
+  buildPalettePicker();
+
   function buildParameterPanel() {
     const holder = $('fluid-parameter-list');
     for (const group of PARAM_GROUPS) {
@@ -501,6 +555,11 @@
     $('wave-enabled').checked = true; $('wave-enabled').dispatchEvent(new Event('change'));
     $('surface-enabled').checked = false; $('surface-enabled').dispatchEvent(new Event('change'));
     Object.assign(PARAMS, PARAM_DEFAULTS);
+    selectedPalette=PALETTES[0];
+    glow.setPalette(paletteUniforms(selectedPalette));
+    for (const card of document.querySelectorAll('.palette-card'))
+      card.setAttribute('aria-pressed',String(card.dataset.palette===selectedPalette.id));
+    $('palette-note').textContent=selectedPalette.note;
     for (const control of document.querySelectorAll('[data-param]')) {
       control.value = PARAMS[control.dataset.param];
       control.dispatchEvent(new Event('input'));
