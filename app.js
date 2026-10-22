@@ -363,7 +363,7 @@
       waveB: (setting.waveEnabled && !reduceMotion) ? clamp(waves.x2 * .16 * setting.wave * setting.intensity, -.042, .042) : 0,
       surfaceMotion: surfaceLevel,
       fringe: PARAMS.fringe - .18 * H
-    });;
+    });
 
     if (!hasWebGL) {
       document.documentElement.style.setProperty('--fallback-brightness', String(0.70 + (smoothed.bass + smoothed.loudness) * .5));
