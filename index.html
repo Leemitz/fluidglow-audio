@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#090b11">
+  <meta name="description" content="FluidGlow Audio — 由音乐驱动的虹彩油滴 WebGL 艺术实验。">
+  <title>FluidGlow Audio — Sound in Liquid</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="logo" href="./" aria-label="FluidGlow Audio 首页"><span class="logo-mark"><i></i><i></i><i></i></span><span>FLUID<span class="logo-light">/</span>GLOW<span class="logo-light"> AUDIO</span></span></a>
+    <div class="top-actions"><span class="stage-pill"><span class="live-dot"></span> PHASE 01 / AUDIO REACTIVE</span><button id="fullscreen-btn" class="icon-button" aria-label="进入全屏" title="全屏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m13-5v4a1 1 0 0 1-1 1h-4"/></svg></button></div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel" id="panel">
+      <div class="eyebrow"><span class="accent-dash"></span> GENERATIVE AUDIO EXPERIMENT</div>
+      <h1>让声音<br><em>拥有形状。</em></h1>
+      <p class="intro">频率不控制液滴的轨迹，而是让它呼吸、流动、发光。<br>每一个瞬间，都是音乐留下的涟漪。</p>
+
+      <section class="control-section" aria-labelledby="source-heading">
+        <div class="section-head"><h2 id="source-heading">音频输入</h2><span class="section-index">01 / SOURCE</span></div>
+        <div class="source-grid">
+          <button class="source-btn active" id="demo-btn" aria-pressed="true"><span class="source-icon">✦</span><strong>体验模式</strong><small>内置节奏动画</small></button>
+          <button class="source-btn" id="upload-btn"><span class="source-icon">♫</span><strong>选择音乐</strong><small>本地 MP3 / WAV</small></button>
+          <button class="source-btn" id="mic-btn" aria-pressed="false"><span class="source-icon">◎</span><strong>麦克风</strong><small>实时响应声音</small></button>
+        </div>
+        <input type="file" id="audio-file" accept="audio/*,.mp3,.wav,.ogg,.m4a,.flac" hidden>
+        <div class="track-panel" id="track-panel" hidden>
+          <div class="track-head"><span class="track-art">♫</span><div class="track-info"><strong id="track-name">未选择音乐</strong><small id="track-detail">音频将在此浏览器中处理</small></div><button id="play-btn" class="play-btn" aria-label="播放或暂停">❚❚</button></div>
+          <input id="seek" type="range" min="0" max="1000" value="0" aria-label="播放进度">
+          <div class="track-times"><span id="current-time">0:00</span><span id="duration">0:00</span></div>
+        </div>
+        <p class="privacy-note">◌ 音频只在你的设备上分析，不上传服务器。</p>
+      </section>
+
+      <section class="control-section" aria-labelledby="response-heading">
+        <div class="section-head"><h2 id="response-heading">声音映射</h2><span class="section-index">02 / RESPONSE</span></div>
+        <div class="band-row"><div class="band-label"><span class="band-glyph bass-glyph">◉</span><div><strong>BASS <span>低频</span></strong><small>柔和呼吸 / SIZE</small></div></div><div class="meter"><span id="bass-fill"></span></div><span class="band-num" id="bass-value">00</span></div>
+        <div class="band-row"><div class="band-label"><span class="band-glyph mid-glyph">◌</span><div><strong>MID <span>中频</span></strong><small>虹彩流动 / FILM</small></div></div><div class="meter"><span id="mid-fill"></span></div><span class="band-num" id="mid-value">00</span></div>
+        <div class="band-row"><div class="band-label"><span class="band-glyph high-glyph">✧</span><div><strong>HIGH <span>高频</span></strong><small>边缘光泽 / GLOW</small></div></div><div class="meter"><span id="high-fill"></span></div><span class="band-num" id="high-value">00</span></div>
+      </section>
+
+      <section class="control-section settings" aria-labelledby="tune-heading">
+        <div class="section-head"><h2 id="tune-heading">微调工作台</h2><span class="section-index">03 / TUNING</span></div>
+        <label class="slider-row"><span>响应灵敏度 <output id="sensitivity-out">1.25×</output></span><input id="sensitivity" type="range" min="0.5" max="3" step="0.05" value="1.25"></label>
+        <label class="slider-row"><span>视觉响应幅度 <output id="intensity-out">70%</output></span><input id="intensity" type="range" min="0" max="100" step="1" value="70"></label>
+        <label class="slider-row"><span>运动速度 <output id="speed-out">0.24</output></span><input id="speed" type="range" min="0" max="0.65" step="0.01" value="0.24"></label>
+        <div class="stability-note"><span class="lock-icon">◇</span><div><strong>稳定融合保护 <span class="stable">ON</span></strong><p>MERGE 0.17 · SPREAD 1.70 保持固定，避免音乐导致液滴接近时突然吸附。</p></div></div>
+        <button id="reset-btn" class="reset-btn">↺ 恢复默认设置</button>
+      </section>
+      <div class="panel-foot"><span>BUILT ON <a href="https://github.com/stephanezdz/fluidglow" target="_blank" rel="noopener">FLUIDGLOW ↗</a></span><span>WEBGL + WEB AUDIO</span></div>
+    </aside>
+
+    <div class="view-area" id="dropzone">
+      <canvas id="fluid-canvas" aria-label="随音乐变化的虹彩油滴可视化"></canvas>
+      <div class="fallback-visual" id="fallback-visual" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="view-legend"><span class="legend-cross">＋</span><span>LIQUID STUDY <i>001</i></span></div>
+      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">IRIDESCENT<br>RESONANCE</div><p id="visual-status">体验模式运行中 · 选择音乐来驱动画面</p></div></div>
+      <div class="view-bottom"><span>FOUR BODIES / ONE CONTINUOUS FIELD</span><span class="movement-indicator"><i></i> ORGANIC MOTION</span></div>
+      <div class="drop-hint" id="drop-hint"><span>♫</span> 松开以载入音乐文件</div>
+    </div>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <audio id="player" preload="metadata"></audio>
+  <script src="fluidglow.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
