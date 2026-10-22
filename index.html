@@ -12,14 +12,14 @@
   <div class="grain" aria-hidden="true"></div>
   <header class="topbar">
     <a class="logo" href="./" aria-label="FluidGlow Audio 首页"><span class="logo-mark"><i></i><i></i><i></i></span><span>FLUID<span class="logo-light">/</span>GLOW<span class="logo-light"> AUDIO</span></span></a>
-    <div class="top-actions"><span class="stage-pill"><span class="live-dot"></span> PHASE 01 / AUDIO REACTIVE</span><button id="fullscreen-btn" class="icon-button" aria-label="进入全屏" title="全屏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m13-5v4a1 1 0 0 1-1 1h-4"/></svg></button></div>
+    <div class="top-actions"><span class="stage-pill"><span class="live-dot"></span> PHASE 02 / ELASTIC WAVES</span><button id="fullscreen-btn" class="icon-button" aria-label="进入全屏" title="全屏"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 3H4a1 1 0 0 0-1 1v4m13-5h4a1 1 0 0 1 1 1v4M3 16v4a1 1 0 0 0 1 1h4m13-5v4a1 1 0 0 1-1 1h-4"/></svg></button></div>
   </header>
 
   <main class="layout">
     <aside class="panel" id="panel">
       <div class="eyebrow"><span class="accent-dash"></span> GENERATIVE AUDIO EXPERIMENT</div>
       <h1>让声音<br><em>拥有形状。</em></h1>
-      <p class="intro">音乐不改变液滴的轨迹；低音让它呼吸，整体响度让它发光。<br>每一个瞬间，都是音乐留下的涟漪。</p>
+      <p class="intro">鼓点激发弹性波，液滴自然回弹；响度依然控制光泽。<br>每一个瞬间，都是音乐留下的涟漪。</p>
 
       <section class="control-section" aria-labelledby="source-heading">
         <div class="section-head"><h2 id="source-heading">音频输入</h2><span class="section-index">01 / SOURCE</span></div>
@@ -43,6 +43,7 @@
         <div class="band-row"><div class="band-label"><span class="band-glyph bass-glyph">◉</span><div><strong>BASS <span>低频</span></strong><small>柔和呼吸 / SIZE</small></div></div><div class="meter"><span id="bass-fill"></span></div><span class="band-num" id="bass-value">00</span></div>
         <div class="band-row"><div class="band-label"><span class="band-glyph mid-glyph">◌</span><div><strong>MID <span>中频</span></strong><small>虹彩流动 / FILM</small></div></div><div class="meter"><span id="mid-fill"></span></div><span class="band-num" id="mid-value">00</span></div>
         <div class="band-row"><div class="band-label"><span class="band-glyph high-glyph">✧</span><div><strong>HIGH <span>高频</span></strong><small>细微边缘质感 / FRINGE</small></div></div><div class="meter"><span id="high-fill"></span></div><span class="band-num" id="high-value">00</span></div>
+        <div class="beat-feedback"><span class="beat-lamp" id="beat-lamp" aria-hidden="true"></span><span>BEAT <small>鼓点瞬态 → 弹性波</small></span><strong id="beat-count">000</strong></div>
       </section>
 
       <section class="control-section settings" aria-labelledby="tune-heading">
@@ -50,6 +51,8 @@
         <label class="slider-row"><span>响应灵敏度 <output id="sensitivity-out">1.25×</output></span><input id="sensitivity" type="range" min="0.5" max="3" step="0.05" value="1.25"></label>
         <label class="slider-row"><span>视觉响应幅度 <output id="intensity-out">85%</output></span><input id="intensity" type="range" min="0" max="100" step="1" value="85"></label>
         <label class="slider-row"><span>运动速度 <output id="speed-out">0.24</output></span><input id="speed" type="range" min="0" max="0.65" step="0.01" value="0.24"></label>
+        <label class="slider-row"><span>弹性波强度 <output id="wave-out">100%</output></span><input id="wave" type="range" min="0" max="160" step="5" value="100"></label>
+        <button id="test-wave-btn" class="test-wave-btn" type="button">↝ 敲击预览 <small>手动测试一次弹性冲击</small></button>
         <div class="stability-note"><span class="lock-icon">◇</span><div><strong>稳定融合保护 <span class="stable">ON</span></strong><p>MERGE 0.17 · SPREAD 1.70 保持固定，避免音乐导致液滴接近时突然吸附。</p></div></div>
         <button id="reset-btn" class="reset-btn">↺ 恢复默认设置</button>
       </section>
@@ -60,8 +63,8 @@
       <canvas id="fluid-canvas" aria-label="随音乐变化的虹彩油滴可视化"></canvas>
       <div class="fallback-visual" id="fallback-visual" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="view-legend"><span class="legend-cross">＋</span><span>LIQUID STUDY <i>001</i></span></div>
-      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">IRIDESCENT<br>RESONANCE</div><p id="visual-status">体验模式运行中 · 选择音乐来驱动画面</p></div></div>
-      <div class="view-bottom"><span>FOUR BODIES / ONE CONTINUOUS FIELD</span><span class="movement-indicator"><i></i> ORGANIC MOTION</span></div>
+      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">IRIDESCENT<br>RESONANCE <span class="caption-version">V1.2</span></div><p id="visual-status">体验模式运行中 · 选择音乐来驱动画面</p></div></div>
+      <div class="view-bottom"><span>FOUR BODIES / DAMPED SURFACE WAVES</span><span class="movement-indicator"><i></i> ORGANIC MOTION</span></div>
       <div class="drop-hint" id="drop-hint"><span>♫</span> 松开以载入音乐文件</div>
     </div>
   </main>
