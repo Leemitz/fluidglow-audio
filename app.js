@@ -1,8 +1,5 @@
-/**
- * FluidGlow Audio — phase 1.
- * Audio changes material/size only. Geometry topology controls (merge/spread)
- * are deliberately constant so no audio spike can teleport bubble centres.
- * All uploaded audio is decoded/analyzed in the browser, never uploaded.
+/** FluidGlow Audio v2 — three coaxial glass lenses and bass-triggered spectral rings.
+ * Local audio stays in the browser. Existing FFT bands / RMS / envelopes are reused.
  */
 (() => {
   'use strict';
@@ -11,17 +8,26 @@
   const clamp = (n, a = 0, b = 1) => Math.max(a, Math.min(b, n));
   const toClock = seconds => Number.isFinite(seconds) ?
     `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}` : '0:00';
-  // Artist-picked sRGB black/gold presets; independent of audio analysis.
+  // Bundled tracks use relative URLs so a clone or static deployment is portable.
+  const PLAYLIST = [
+    { title: 'Rivers In the Desert', src: 'audio/rivers-in-the-desert.mp3' },
+    { title: '星と僕らと', detail: 'Lyn / アトラスサウンドチーム', src: 'audio/hoshi-to-bokura-to.mp3' },
+    { title: '远航星的告别', src: 'audio/yuan-hang-xing-de-gao-bie.mp3' },
+    { title: '新长征路上的摇滚', src: 'audio/xin-chang-zheng-lu-shang-de-yao-gun.mp3' },
+    { title: 'Hello', src: 'audio/hello.mp3' }
+  ];
+  // Artist-picked sRGB metal presets; independent of audio analysis.
   const PALETTES = [
     {id:'champagne',name:'香槟黑金',en:'CHAMPAGNE NOIR',note:'温润香槟金 / 柔和玫瑰影',colors:['#F4E3C4','#D1AC78','#A87D64'],bg:'#060506'},
-    {id:'rose',name:'玫瑰鎏金',en:'ROSE OBSIDIAN',note:'粉铜反光 / 暗玫瑰黑',colors:['#F2C5B9','#C78B83','#AF8265'],bg:'#0A0609'},
+    {id:'rose',name:'玫瑰金',en:'ROSE GOLD',note:'玫瑰金反射 / 珍珠白导光',colors:['#F8E6E1','#CE9C95','#A76D68'],bg:'#0A0709'},
     {id:'royal',name:'曜石深金',en:'GILDED ONYX',note:'古典深金 / 黑曜石',colors:['#F0D49A','#B89453','#795434'],bg:'#070607'},
     {id:'pearl',name:'月光香槟',en:'PEARL CHAMPAGNE',note:'淡香槟珍珠 / 浅玫瑰',colors:['#F6E8D1','#DBC1A0','#C49A8E'],bg:'#0A090A'},
     {id:'bronze',name:'暮光玫瑰',en:'BRONZE ROSÉ',note:'香槟铜 / 暮色玫瑰金',colors:['#F3D2A7','#BF866D','#9A6157'],bg:'#080507'},
     {id:'original',name:'原版虹彩',en:'ORIGINAL PRISM',note:'原始虹彩 / 对比模式',colors:['#79E4DC','#C38DEA','#E6AEB0'],bg:'#000000',mode:0}
   ];
   const toRgb = hex => [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255);
-  let selectedPalette = PALETTES[0];
+  const DEFAULT_PALETTE = PALETTES.find(preset => preset.id === 'bronze');
+  let selectedPalette = DEFAULT_PALETTE;
   function paletteUniforms(preset) {
     return {
       a:toRgb(preset.colors[0]),b:toRgb(preset.colors[1]),
@@ -31,62 +37,82 @@
   }
   // User-editable baseline; musical signals add bounded offsets.
   const PARAMS = {
-    ...FluidGlow.defaults,
-    zoom: window.innerWidth < 760 ? 1.14 : 1.24,
-    sat: 1.20, hueSpeed: 0.038, gamma: 1.36
+    ...LensRenderer.defaults,
+    zoom: 1, sat: 1.05, gamma: 1.15
   };
   const PARAM_DEFAULTS = { ...PARAMS };
   const PARAM_GROUPS = [
-    { title: '形状与融合 / SHAPE', fields: [
-      ['size', '液滴基础尺寸', .40, 2.40, .01],
-      ['spread', '液滴间距', .5, 3.2, .01],
-      ['merge', '融合强度', .01, .40, .005],
-      ['incline', '轨道倾角', -.8, .8, .01],
-      ['edge', '边缘柔化', .0004, .018, .0002],
-      ['zoom', '缩放', .5, 2.5, .01],
-      ['posX', '水平偏移', -1, 1, .01],
-      ['posY', '垂直偏移', -1, 1, .01],
-      ['posZ', '景深缩放', -.6, .6, .01]
+    { title: '透镜与构图 / LENSES', fields: [
+      ['size', '透镜尺寸', .6, 1.4, .01],
+      ['spread', '轴向间距', .65, 1.6, .01],
+      ['incline', '基础视角倾角', -1.25, -.45, .01],
+      ['rotation', '基础画面旋转', -.3, 1.2, .01],
+      ['thickness', '透镜中心厚度', .20, .90, .01],
+      ['zoom', '画面缩放', .6, 1.5, .01],
+      ['posX', '水平偏移', -.6, .6, .01],
+      ['posY', '垂直偏移', -.6, .6, .01]
     ]},
-    { title: '材质与颜色 / OPTICS', fields: [
-      ['glow', '边缘光泽', 0, 6, .02],
-      ['aura', '外侧光晕', 0, 2, .01],
-      ['film', '油膜宽度', .03, 1, .01],
-      ['fringe', '边缘锐度', .6, 12, .05],
-      ['sat', '饱和度', 0, 2, .01],
-      ['hueSpeed', '色相流动速度', -.5, .5, .005],
-      ['hueOff', '色相偏移', -1, 1, .01],
-      ['body', '液滴内部亮度', 0, 2, .02],
-      ['light', '定向照明', 0, 1, .01],
-      ['gamma', '伽马', .6, 2.8, .01]
+    { title: '半透材质 / OPTICS', fields: [
+      ['reflection', '反射率', .1, .9, .01],
+      ['edgeGlow', '亚克力侧壁导光', 0, 2.5, .05],
+      ['edgeSat', '侧壁导光饱和度', 0, 1, .02],
+      ['fresnelEdge', '平面菲涅尔亮边', 0, 1.8, .05],
+      ['interReflection', '透镜之间的反射', 0, 1, .05],
+      ['opacity', '不透明度', .15, .8, .01],
+      ['glow', '反射亮度', .5, 2.5, .02],
+      ['aura', '粒子光泽', 0, 1, .01],
+      ['roughness', '反射柔度', .03, .7, .01],
+      ['bandWidth', '反射灯箱宽度', .8, 4, .1],
+      ['sat', '饱和度', 0, 1.6, .01],
+      ['light', '虚拟灯箱亮度', 0, 1, .01],
+      ['gamma', '伽马', .6, 2, .01]
     ]},
-    { title: '独立运动 / MOTION', fields: [
-      ['speed', '轨道速度', 0, 1.5, .01]
+    { title: '波前与光照 / WAVEFRONTS', fields: [
+      ['midMotion', '中频运动倍率', .5, 3.5, .1],
+      ['highMotion', '高频运动倍率', .5, 3.5, .1],
+      ['rippleSpeed', '涟漪扩散速度', .3, 1.6, .02],
+      ['rippleLife', '涟漪寿命（秒）', 1.2, 5, .1],
+      ['rippleHeight', 'Y 轴频谱高度', .2, 1.8, .02],
+      ['rippleGrowth', '扩散增高倍率', .1, 2, .05],
+      ['rippleRise', '沿 +Y 整体抬升', 0, .6, .02],
+      ['speed', '自主光照速度', 0, 1.5, .01]
     ]}
   ];
-  const AUDIO_PARAMETERS = new Set(['size','glow','aura','film','hueOff','fringe']);
+  const AUDIO_PARAMETERS = new Set(['spread']);
   // A context can exist even when the shader program failed to compile.
-  const glow = FluidGlow({
+  const glow = LensRenderer({
     canvas: $('fluid-canvas'), ...PARAMS, palette: paletteUniforms(selectedPalette), maxDpr: 1.5
   });
   const hasWebGL = glow.ready === true;
   if (!hasWebGL) document.body.classList.add('no-webgl');
-  if (glow.safeMode) document.body.classList.add('shader-safe-mode');
+  $('reset-view-btn').disabled = !hasWebGL;
+  $('reset-view-btn').addEventListener('click', () => glow.resetView());
 
-  let mode = 'demo';
+  let mode = 'playlist';
+  let playlistIndex = 0;
+  let sourceRevision = 0;
   let ctx = null;
   let analyser = null;
   let fileSource = null;
   let micSource = null;
   let micStream = null;
   let activeUrl = null;
-  let frequencyBins = null;
-  let previousBins = null;
+  let frequencyDb = null;
+  let dynamics = null;
+  const emptySpectrum = () => ({loudness:0,bass:0,mid:0,high:0,flux:0,bassFlux:0,
+    bassThreshold:0,attacks:{bass:0,mid:0,high:0}});
+  let latestSpectrum=emptySpectrum();
   let waveform = null;
+  const ringSpectrum = new Float32Array(96);
   let toastTimer;
   const player = $('player');
   const smoothed = { loudness: 0, bass: 0, mid: 0, high: 0 };
-  const setting = { sensitivity: 1.25, intensity: .85, beatSensitivity: 1.20, wave: 1, waveEnabled: true, surfaceEnabled: false };
+  const INPUT_DEFAULTS = Object.freeze({ sensitivity: 1.25, intensity: 85, motion: 70,
+    beatSensitivity: 1.45, kickInterval: 300, wave: 100 });
+  const setting = { sensitivity: INPUT_DEFAULTS.sensitivity, intensity: INPUT_DEFAULTS.intensity/100,
+    motion: INPUT_DEFAULTS.motion/100, beatSensitivity: INPUT_DEFAULTS.beatSensitivity,
+    kickInterval: INPUT_DEFAULTS.kickInterval/1000, wave: INPUT_DEFAULTS.wave/100,
+    waveEnabled: true, surfaceEnabled: false };
   let surfaceLevel = 0;
   const meters = {
     loudness: [$('loudness-fill'), $('loudness-value')],
@@ -106,12 +132,14 @@
   function status(message) { $('visual-status').textContent = message; }
   function activate(which) {
     mode = which;
-    for (const name of ['demo', 'upload', 'mic']) {
+    for (const name of ['playlist', 'upload', 'mic']) {
       const active = (name === 'upload' ? which === 'file' : name === which);
       $(name + '-btn').classList.toggle('active', active);
       if (name !== 'upload') $(name + '-btn').setAttribute('aria-pressed', String(active));
     }
-    $('track-panel').hidden = which !== 'file';
+    $('track-panel').hidden = which !== 'file' && which !== 'playlist';
+    $('playlist-panel').hidden = which !== 'playlist';
+    $('previous-btn').hidden = $('next-btn').hidden = which !== 'playlist';
   }
 
   function stopMicrophone() {
@@ -130,11 +158,11 @@
       ctx = new Context();
       analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.30; // Keep drum transients visible to FFT flux.
-      analyser.minDecibels = -95;
-      analyser.maxDecibels = -20;
-      frequencyBins = new Uint8Array(analyser.frequencyBinCount);
-      previousBins = new Uint8Array(analyser.frequencyBinCount);
+      analyser.smoothingTimeConstant = .08; // Float FFT keeps high-level attacks intact.
+      analyser.minDecibels = -110;
+      analyser.maxDecibels = 0; // Display range only; float FFT is not clipped by these values.
+      frequencyDb = new Float32Array(analyser.frequencyBinCount);
+      dynamics = new AudioDynamics(ctx.sampleRate, analyser.fftSize);
       waveform = new Float32Array(analyser.fftSize);
     }
     if (ctx.state !== 'running') await ctx.resume();
@@ -147,30 +175,74 @@
     fileSource.connect(ctx.destination); // Never connect microphone to speakers.
   }
 
+  function prepareTrack(src, title, detail, which) {
+    sourceRevision++;
+    stopAudio();
+    if (activeUrl) { URL.revokeObjectURL(activeUrl); activeUrl = null; }
+    player.src = src;
+    player.load();
+    $('track-name').textContent = title;
+    $('track-detail').textContent = detail;
+    $('seek').value = '0';
+    $('current-time').textContent = $('duration').textContent = '0:00';
+    $('play-btn').textContent = '▶';
+    activate(which);
+    resetOnsetDetector();
+  }
+
+  async function playCurrentTrack() {
+    const revision = ++sourceRevision;
+    try {
+      await ensureAudioGraph();
+      if (revision !== sourceRevision) return;
+      connectFile();
+      await player.play();
+      if (revision === sourceRevision)
+        status('三频正在驱动透镜间距 · 低频鼓点激发频谱涟漪');
+    } catch (error) {
+      if (revision !== sourceRevision || error.name === 'AbortError') return;
+      status('音乐已就绪 · 点击播放开始体验');
+      toast(error.name === 'NotAllowedError' ? '点击播放按钮开始音乐' : '音频无法播放，请检查文件或选择其他曲目');
+    }
+  }
+
+  function selectPlaylistTrack(index, autoplay = true) {
+    playlistIndex = (index + PLAYLIST.length) % PLAYLIST.length;
+    const track = PLAYLIST[playlistIndex];
+    prepareTrack(track.src, track.title,
+      `体验歌单 · ${playlistIndex + 1} / ${PLAYLIST.length}${track.detail ? ' · ' + track.detail : ''}`, 'playlist');
+    for (const row of $('playlist-list').children)
+      row.setAttribute('aria-current', String(Number(row.dataset.index) === playlistIndex));
+    status('体验歌单已就绪 · 点击播放，让音乐驱动画面');
+    if (autoplay) return playCurrentTrack();
+  }
+
+  function buildPlaylist() {
+    PLAYLIST.forEach((track, index) => {
+      const row = document.createElement('button');
+      row.type = 'button'; row.className = 'playlist-track'; row.dataset.index = index;
+      const number = document.createElement('span');
+      number.className = 'playlist-number'; number.textContent = String(index + 1).padStart(2, '0');
+      const title = document.createElement('span');
+      title.className = 'playlist-title'; title.textContent = track.title;
+      row.append(number, title);
+      row.addEventListener('click', () => selectPlaylistTrack(index));
+      $('playlist-list').append(row);
+    });
+  }
+
   async function loadFile(file) {
     if (!file || !(file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac|opus|webm)$/i.test(file.name))) {
       toast('请选择音频文件（MP3 / WAV / OGG / M4A 等）');
       return;
     }
     try {
-      await ensureAudioGraph();
-      stopAudio();
-      connectFile();
-      if (activeUrl) URL.revokeObjectURL(activeUrl);
-      activeUrl = URL.createObjectURL(file);
-      player.src = activeUrl;
-      player.load();
-      $('track-name').textContent = file.name;
-      $('track-detail').textContent = '本地音频 · 浏览器实时 FFT 分析';
-      activate('file');
-      resetOnsetDetector();
-      await player.play();
-      $('play-btn').textContent = '❚❚';
-      status('你的音乐正在驱动液滴的呼吸与光泽');
-      toast('音乐载入成功，开始实时响应');
+      const url = URL.createObjectURL(file);
+      prepareTrack(url, file.name, '本地音频 · 浏览器实时 FFT 分析', 'file');
+      activeUrl = url;
+      await playCurrentTrack();
     } catch (error) {
       console.error(error);
-      if (mode !== 'file') activate('demo');
       toast('音频无法播放，请尝试 MP3 或 WAV 文件');
     }
   }
@@ -178,14 +250,15 @@
   async function useMicrophone() {
     if (mode === 'mic') {
       stopMicrophone();
-      activate('demo'); resetOnsetDetector();
-      status('体验模式运行中 · 选择音乐来驱动画面');
+      selectPlaylistTrack(playlistIndex, false);
       return;
     }
+    const revision = ++sourceRevision;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('需要 HTTPS 或 localhost');
       await ensureAudioGraph();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false }, video: false });
+      if (revision !== sourceRevision) { stream.getTracks().forEach(track => track.stop()); return; }
       stopAudio();
       micStream = stream;
       micSource = ctx.createMediaStreamSource(stream);
@@ -200,81 +273,18 @@
     }
   }
 
-  // Log-compressed spectral averages, without rapidly adapting normalization.
-  // This avoids the visual "pumping" and sudden jumps caused by a moving peak.
-  function energyBetween(lowHz, highHz) {
-    const hzPerBin = ctx.sampleRate / analyser.fftSize;
-    const start = clamp(Math.ceil(lowHz / hzPerBin), 1, frequencyBins.length - 1);
-    const end = clamp(Math.floor(highHz / hzPerBin), start + 1, frequencyBins.length);
-    let energy = 0;
-    for (let i = start; i < end; i++) {
-      const n = frequencyBins[i] / 255;
-      energy += n * n;
-    }
-    const rms = Math.sqrt(energy / Math.max(1, end - start));
-    const gated = clamp((rms - .055) / .52);
-    return clamp(Math.pow(gated, .82) * setting.sensitivity);
-  }
-
-  // Time-domain RMS represents overall loudness, not a sum of spectral bins.
-  // Gentle gating, compression, and an envelope make quiet music perceptible
-  // without allowing sudden peaks to change the metaball topology.
-  function overallLoudness() {
+  // The display compressor and the onset detector have separate signal paths.
+  // Float FFT preserves attacks even above the old byte FFT's -20 dB ceiling.
+  function spectrum(dt) {
+    if (!analyser || !frequencyDb || !waveform || ctx?.state !== 'running')
+      return { loudness: 0, bass: 0, mid: 0, high: 0, flux: 0, bassFlux: 0,
+        bassThreshold: 0, attacks: { bass: 0, mid: 0, high: 0 } };
+    analyser.getFloatFrequencyData(frequencyDb);
     analyser.getFloatTimeDomainData(waveform);
-    let sum = 0;
-    for (let i = 0; i < waveform.length; i++) sum += waveform[i] * waveform[i];
-    const rms = Math.sqrt(sum / waveform.length);
-    return clamp(Math.pow(clamp((rms - .012) / .22), .65) * setting.sensitivity);
-  }
-
-  // Weighted positive spectral flux, from ungated FFT bins (35–2600 Hz).
-  // This measures attacks, not sustained bass level or a moving peak.
-  function spectralFlux() {
-    if (!previousBins) return 0;
-    const hzPerBin = ctx.sampleRate / analyser.fftSize;
-    const end = Math.min(frequencyBins.length, Math.ceil(2600 / hzPerBin));
-    let flux = 0, weights = 0;
-    for (let i = 1; i < end; i++) {
-      const hz = i * hzPerBin;
-      if (hz < 35) continue;
-      const weight = hz < 180 ? 2.3 : hz < 900 ? 1.25 : 0.75;
-      const delta = (frequencyBins[i] - previousBins[i]) / 255;
-      flux += Math.max(0, delta) * weight;
-      weights += weight;
-    }
-    previousBins.set(frequencyBins);
-    return flux / Math.max(weights, 1);
-  }
-
-  function spectrum() {
-    if (!analyser || !frequencyBins || !waveform || ctx?.state !== 'running')
-      return { loudness: 0, bass: 0, mid: 0, high: 0, flux: 0 };
-    analyser.getByteFrequencyData(frequencyBins);
-    const flux = spectralFlux();
-    return {
-      loudness: overallLoudness(),
-      bass: energyBetween(35, 180),
-      mid: energyBetween(180, 1900),
-      high: energyBetween(1900, 10000),
-      flux
-    };
-  }
-
-  // A *silent* illustrative rhythm, deliberately labeled as a visual demo.
-  // Unlike uploaded files or microphone mode, it is not analyzing real sound.
-  function simulatedSpectrum(t) {
-    const beat = t % .66;
-    const upbeat = (t + .32) % .66;
-    const kick = Math.exp(-beat / .16);
-    const snare = Math.exp(-upbeat / .20);
-    const hat = Math.exp(-((t + .03) % .165) / .055);
-    return {
-      loudness: clamp(.14 + .67 * kick + .32 * snare),
-      bass: clamp(.10 + .75 * kick + .08 * (Math.sin(t * 2.1) + 1)),
-      mid: clamp(.15 + .34 * snare + .17 * (Math.sin(t * 2.8 - .6) + 1)),
-      high: clamp(.15 + .53 * hat + .08 * Math.sin(t * 9) ** 2),
-      flux: 0
-    };
+    const raw = dynamics.process(frequencyDb, waveform, dt, setting.sensitivity,
+      setting.beatSensitivity, setting.kickInterval);
+    dynamics.spectrumSnapshot(ringSpectrum, setting.sensitivity);
+    return raw;
   }
 
   // Attack/release in *seconds*, independent of screen refresh rate.
@@ -283,105 +293,67 @@
     return current + (target - current) * (1 - Math.exp(-dt / tau));
   }
 
-  // Beat detection: fast vs slow bass-weighted envelope with a rising-edge
-  // threshold + refractory period. Sustained bass cannot continuously re-hit.
-  const beat = { fluxBaseline: .004, previous: 0, armed: true, lastAt: -Infinity,
-    demoStep: -1, count: 0, flash: 0, novelty: 0, threshold: 0 };
-  const waves = { x1: 0, v1: 0, x2: 0, v2: 0 };
-  let elapsed = 0;
-  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion:reduce)').matches;
+  // Onsets come from unclipped physical spectral energy, never from a meter
+  // percentage or its rounded delta. Each band can also excite its lens.
+  const beat = { count: 0, flash: 0, novelty: 0, threshold: 0 };
+  const motionPreference = window.matchMedia('(prefers-reduced-motion:reduce)');
+  let reduceMotion = motionPreference.matches;
+  motionPreference.addEventListener('change', () => {
+    reduceMotion = motionPreference.matches;
+    resetOnsetDetector();
+  });
 
   function resetOnsetDetector() {
-    beat.fluxBaseline = .004; beat.previous = 0; beat.armed = true;
-    beat.lastAt = -Infinity; beat.demoStep = -1; beat.novelty = 0; beat.threshold = 0;
-    if (previousBins) previousBins.fill(0);
+    dynamics?.reset(); ringSpectrum.fill(0); glow.clearRipples(); glow.clearMotion();
+    latestSpectrum=emptySpectrum();
+    beat.novelty = 0; beat.threshold = 0;
   }
 
   function strike(strength = 1) {
     const hit = clamp(strength, .25, 1.35);
-    // Impulse changes VELOCITY, never shape/position instantly.
-    waves.v1 = clamp(waves.v1 + 12.5 * hit, -16, 16);
-    waves.v2 = clamp(waves.v2 - 8.2 * hit, -12, 12);
+    glow.emitRipple(ringSpectrum, hit * setting.wave * setting.intensity);
     beat.flash = 1;
     beat.count += 1;
   }
 
-  function detectBeat(raw, dt, nowSeconds) {
-    if (mode === 'demo') {
-      const step = Math.floor(elapsed / .66);
-      if (beat.demoStep !== step) {
-        beat.demoStep = step;
-        if (setting.waveEnabled) strike(.88);
-      }
-      return;
-    }
-    if (mode === 'file' && player.paused) return;
-    if (mode !== 'file' && mode !== 'mic') return;
-    const flux = raw.flux;
-    const baselineBefore = beat.fluxBaseline;
-    const adapt = 1 - Math.exp(-dt / .60);
-    beat.fluxBaseline += (flux - beat.fluxBaseline) * adapt;
-    const threshold = Math.max(.005, baselineBefore * 1.40 + .0025) / setting.beatSensitivity;
-    beat.novelty = flux;
-    beat.threshold = threshold;
-    // Hysteresis and a 200ms refractory period avoid repeated triggers.
-    if (flux < threshold * .62) beat.armed = true;
-    const fresh = flux > threshold && flux > beat.previous * 1.08;
-    if (setting.waveEnabled && beat.armed && fresh &&
-        raw.loudness > .035 && nowSeconds - beat.lastAt > .20) {
-      beat.lastAt = nowSeconds;
-      beat.armed = false;
-      strike(clamp(.55 + (flux / Math.max(threshold, .001) - 1) * .20, .55, 1.18));
-    }
-    beat.previous = flux;
-  }
-
-  function simulateElasticWaves(dt) {
-    // Fixed micro-steps keep both damped spring modes stable at varied FPS.
-    const steps = Math.max(1, Math.ceil(dt / (1 / 180)));
-    const h = dt / steps;
-    for (let i = 0; i < steps; i++) {
-      waves.v1 += (-19 * 19 * waves.x1 - 7.8 * waves.v1) * h;
-      waves.x1 += waves.v1 * h;
-      waves.v2 += (-29 * 29 * waves.x2 - 11.5 * waves.v2) * h;
-      waves.x2 += waves.v2 * h;
-    }
+  function detectBeat(raw) {
+    if (mode !== 'mic' && player.paused) return;
+    beat.novelty = raw.bassFlux; beat.threshold = raw.bassThreshold;
+    glow.kick({ bass: raw.attacks.bass*setting.intensity, mid: raw.attacks.mid*setting.intensity,
+      high: raw.attacks.high*setting.intensity });
+    if (setting.waveEnabled && raw.attacks.bass > 0) strike(raw.attacks.bass);
   }
 
   const start = performance.now();
   let last = start;
   let lastUi = 0;
+  let lastAudioSample=start;
+  // Audio analysis must not inherit the display/GPU frame rate. A 24ms hop
+  // overlaps the ~46ms FFT window by roughly half. Handle every onset here
+  // so no transient is overwritten before the next display frame.
+  const audioTimer=setInterval(()=>{
+    const now=performance.now(),dt=clamp((now-lastAudioSample)/1000,.001,.10);
+    lastAudioSample=now;
+    if(mode!=='mic'&&player.paused){latestSpectrum=emptySpectrum();return;}
+    latestSpectrum=spectrum(dt);
+    if(!reduceMotion)detectBeat(latestSpectrum);
+  },24);
   function animate(now) {
-    const dt = clamp((now - last) / 1000, 0, .05);
+    const dt = clamp((now - last) / 1000, 0, .10);
     last = now;
-    elapsed += dt;
-    const raw = mode === 'demo' ? simulatedSpectrum(elapsed) : spectrum();
-    if (!reduceMotion) detectBeat(raw, dt, now / 1000);
-    simulateElasticWaves(dt);
+    const raw = latestSpectrum;
     surfaceLevel = envelope(surfaceLevel, setting.surfaceEnabled && !reduceMotion ? 1 : 0, dt, .28, .34);
     beat.flash *= Math.exp(-dt / .16);
     smoothed.loudness = envelope(smoothed.loudness, raw.loudness, dt, .045, .26);
     smoothed.bass = envelope(smoothed.bass, raw.bass, dt, .08, .32);
-    smoothed.mid = envelope(smoothed.mid, raw.mid, dt, .18, .55);
-    smoothed.high = envelope(smoothed.high, raw.high, dt, .030, .19);
+    smoothed.mid = envelope(smoothed.mid, raw.mid, dt, .22, .65);
+    smoothed.high = envelope(smoothed.high, raw.high, dt, .12, .38);
 
-    // RMS remains a diagnostic meter; only high-frequency energy drives illumination.
-    const B = smoothed.bass * setting.intensity;
-    const M = smoothed.mid * setting.intensity;
-    // Compression improves audibility of short treble transients without changing geometry.
-    const H = Math.pow(smoothed.high, .72) * setting.intensity;
-    // Keep the variation of radius small and do not animate merge or spread.
-    glow.setParams({
-      ...PARAMS,
-      size: PARAMS.size + .070 * B,
-      film: PARAMS.film + .130 * M,
-      hueOff: PARAMS.hueOff + .055 * M,
-      glow: PARAMS.glow + 2.70 * H,
-      aura: PARAMS.aura + .90 * H,
-      waveA: (setting.waveEnabled && !reduceMotion) ? clamp(waves.x1 * .17 * setting.wave * setting.intensity, -.10, .10) : 0,
-      waveB: (setting.waveEnabled && !reduceMotion) ? clamp(waves.x2 * .16 * setting.wave * setting.intensity, -.042, .042) : 0,
-      surfaceMotion: surfaceLevel,
-      fringe: PARAMS.fringe - .18 * H
+    glow.setParams({ ...PARAMS, motionGain: setting.motion, surfaceMotion: surfaceLevel });
+    glow.setAudio({
+      bass: smoothed.bass * setting.intensity,
+      mid: smoothed.mid * setting.intensity,
+      high: smoothed.high * setting.intensity
     });
 
     if (!hasWebGL) {
@@ -391,17 +363,18 @@
       lastUi = now;
       $('beat-lamp').style.setProperty('--beat-flash', beat.flash.toFixed(3));
       $('beat-count').textContent = String(beat.count).padStart(3, '0');
-      $('onset-debug').textContent = mode === 'demo' ? 'DEMO · 模拟节奏' : `FLUX ${beat.novelty.toFixed(3)} / ${beat.threshold.toFixed(3)}`;
-      for (const key of ['waveA', 'waveB']) {
-        const output = $('fluid-output-' + key);
-        if (output && glow.params) output.textContent = Number(glow.params[key]).toFixed(3);
+      $('onset-debug').textContent = mode !== 'mic' && player.paused ? '等待播放 · 真实音频分析' : `BASS ONSET ${beat.novelty.toFixed(3)} / ${beat.threshold.toFixed(3)}`;
+      const metrics = glow.metrics;
+      if (metrics) {
+        $('lens-gap').textContent = (metrics.depths[2] - metrics.depths[0]).toFixed(2);
+        $('ripple-count').textContent = String(metrics.activeRipples).padStart(2, '0');
       }
       for (const [key, elements] of Object.entries(meters)) {
         const percent = Math.round(smoothed[key] * 100);
         elements[0].style.width = `${percent}%`;
         elements[1].textContent = String(percent).padStart(2, '0');
       }
-      if (mode === 'file' && player.duration && !$('seek').matches(':active')) {
+      if (mode !== 'mic' && player.duration && !$('seek').matches(':active')) {
         $('seek').value = String(Math.round(player.currentTime / player.duration * 1000));
         $('current-time').textContent = toClock(player.currentTime);
         $('duration').textContent = toClock(player.duration);
@@ -411,11 +384,12 @@
   }
 
   // Player and source controls.
-  $('demo-btn').addEventListener('click', () => {
-    stopAudio(); activate('demo'); resetOnsetDetector();
-    status('体验模式运行中（模拟节奏，无音频）');
-    toast('已切换到无声节奏演示');
+  $('playlist-btn').addEventListener('click', () => {
+    if (mode !== 'playlist') selectPlaylistTrack(playlistIndex);
+    else playCurrentTrack();
   });
+  $('previous-btn').addEventListener('click', () => selectPlaylistTrack(playlistIndex - 1));
+  $('next-btn').addEventListener('click', () => selectPlaylistTrack(playlistIndex + 1));
   $('upload-btn').addEventListener('click', () => $('audio-file').click());
   $('audio-file').addEventListener('change', event => {
     loadFile(event.target.files?.[0]);
@@ -423,16 +397,26 @@
   });
   $('mic-btn').addEventListener('click', useMicrophone);
   $('play-btn').addEventListener('click', async () => {
-    if (mode !== 'file') return;
-    try {
-      if (player.paused) { await ensureAudioGraph(); await player.play(); }
-      else player.pause();
-    } catch (error) { toast('播放失败，请选择其他音频文件'); }
+    if (mode === 'mic') return;
+    if (player.paused) await playCurrentTrack();
+    else player.pause();
   });
   player.addEventListener('play', () => $('play-btn').textContent = '❚❚');
-  player.addEventListener('pause', () => $('play-btn').textContent = '▶');
-  player.addEventListener('ended', () => { $('play-btn').textContent = '▶'; status('音乐播放完成，等待再次播放'); });
-  player.addEventListener('error', () => { if (mode === 'file') toast('浏览器不支持该文件的音频编码'); });
+  player.addEventListener('pause', () => {
+    $('play-btn').textContent = '▶'; resetOnsetDetector();
+    if (mode !== 'mic' && !player.ended) status('音乐已暂停 · 点击播放继续');
+  });
+  player.addEventListener('seeking', resetOnsetDetector);
+  player.addEventListener('ended', () => {
+    if (mode === 'playlist') selectPlaylistTrack(playlistIndex + 1);
+    else { $('play-btn').textContent = '▶'; status('音乐播放完成，等待再次播放'); }
+  });
+  player.addEventListener('error', () => {
+    if (mode === 'mic') return;
+    status('音频加载失败 · 请重新选曲');
+    toast(mode === 'playlist' ? '歌单音频无法加载，请确认 audio 文件夹完整并通过本地服务器打开' : '浏览器不支持该文件的音频编码');
+  });
+  player.addEventListener('loadedmetadata', () => { $('duration').textContent = toClock(player.duration); });
   $('seek').addEventListener('input', event => {
     if (Number.isFinite(player.duration) && player.duration > 0) {
       player.currentTime = player.duration * Number(event.target.value) / 1000;
@@ -440,24 +424,26 @@
   });
 
   $('test-wave-btn').addEventListener('click', () => {
-    if (reduceMotion) { toast('系统已启用减少动态效果，弹性波暂停'); return; }
-    if (!setting.waveEnabled) { toast('请先开启鼓点弹性波开关'); return; }
+    if (reduceMotion) { toast('系统已启用减少动态效果，粒子涟漪暂停'); return; }
+    if (!setting.waveEnabled) { toast('请先开启低频粒子涟漪开关'); return; }
     strike(1);
-    toast('已施加一次测试冲击 · 观察弹性回弹');
+    toast('已发出一圈频谱涟漪 · 观察扩散与淡出');
   });
   $('wave-enabled').addEventListener('change', event => {
     setting.waveEnabled = event.target.checked;
-    if (!setting.waveEnabled) { waves.x1 = waves.v1 = waves.x2 = waves.v2 = 0; }
+    glow.setRipplesEnabled(setting.waveEnabled);
+    resetOnsetDetector();
   });
   $('surface-enabled').addEventListener('change', event => {
     setting.surfaceEnabled = event.target.checked;
-    toast(setting.surfaceEnabled ? '已开启自主表面形变（不读取音乐）' : '已关闭自主表面形变');
+    toast(setting.surfaceEnabled ? '已开启自主反射光移动' : '已关闭自主反射光移动');
   });
-  for (const id of ['sensitivity', 'intensity', 'wave', 'beatSensitivity']) {
+  for (const id of ['sensitivity', 'intensity', 'wave', 'motion', 'beatSensitivity', 'kickInterval']) {
     $(id).addEventListener('input', event => {
       const value = Number(event.target.value);
-      setting[id] = (id === 'intensity' || id === 'wave') ? value / 100 : value;
-      $(id + '-out').textContent = (id === 'intensity' || id === 'wave') ? `${value}%` : `${value.toFixed(2)}×`;
+      const percent = ['intensity','wave','motion'].includes(id);
+      setting[id] = percent ? value/100 : id==='kickInterval' ? value/1000 : value;
+      $(id+'-out').textContent = percent ? `${value}%` : id==='kickInterval' ? `${value} ms` : `${value.toFixed(2)}×`;
     });
   }
 
@@ -537,25 +523,25 @@
       }
       holder.append(section);
     }
-    for (const key of ['waveA', 'waveB']) {
+    for (const [key, label] of [['lens-gap', '高低频透镜轴向距离'], ['ripple-count', '当前可见涟漪']]) {
       const wrap = document.createElement('div');
       wrap.className = 'module-readonly';
-      wrap.innerHTML = `<span>${key} · 实时弹性波输出</span><output id="fluid-output-${key}">0.000</output>`;
+      wrap.innerHTML = `<span>${label}</span><output id="${key}">0</output>`;
       holder.append(wrap);
     }
   }
   buildParameterPanel();
 
   $('reset-btn').addEventListener('click', () => {
-    const defaults = { sensitivity: 1.25, intensity: 85, beatSensitivity: 1.20, wave: 100 };
-    for (const [name, value] of Object.entries(defaults)) {
+    for (const [name, value] of Object.entries(INPUT_DEFAULTS)) {
       $(name).value = String(value);
       $(name).dispatchEvent(new Event('input'));
     }
     $('wave-enabled').checked = true; $('wave-enabled').dispatchEvent(new Event('change'));
     $('surface-enabled').checked = false; $('surface-enabled').dispatchEvent(new Event('change'));
     Object.assign(PARAMS, PARAM_DEFAULTS);
-    selectedPalette=PALETTES[0];
+    glow.resetView();
+    selectedPalette=DEFAULT_PALETTE;
     glow.setPalette(paletteUniforms(selectedPalette));
     for (const card of document.querySelectorAll('.palette-card'))
       card.setAttribute('aria-pressed',String(card.dataset.palette===selectedPalette.id));
@@ -591,16 +577,15 @@
     if (event.dataTransfer?.files?.[0]) loadFile(event.dataTransfer.files[0]);
   });
   window.addEventListener('beforeunload', () => {
-    stopMicrophone(); if (activeUrl) URL.revokeObjectURL(activeUrl);
+    clearInterval(audioTimer);
+    glow.destroy(); stopMicrophone(); if (activeUrl) URL.revokeObjectURL(activeUrl);
     if (ctx && ctx.state !== 'closed') ctx.close();
   });
 
-  if (window.matchMedia?.('(prefers-reduced-motion:reduce)').matches) {
-    status('系统已开启减少动态效果；弹性波被禁用');
-  }
-  if (glow.safeMode) {
-    status('已自动切换兼容模式：油滴正常显示，弹性波在此设备上暂停');
-    toast('设备 Shader 兼容性限制：已自动恢复稳定液滴');
+  buildPlaylist();
+  selectPlaylistTrack(0, false);
+  if (reduceMotion) {
+    status('系统已开启减少动态效果；轴向运动与粒子涟漪已暂停');
   }
   if (!hasWebGL) {
     status('Shader 初始化失败，已显示简化预览。请查看浏览器控制台错误');

@@ -1,80 +1,104 @@
-# FluidGlow Audio — Phase 03 (v1.3.0)
+# FluidGlow Audio — Spectral Lenses (v2.5.0)
 
-A music-reactive iridescent metaball visualizer built on [FluidGlow](https://github.com/stephanezdz/fluidglow). Zero runtime dependencies: **WebGL + Web Audio API**, just HTML, CSS and JavaScript.
+三片同轴、半反射、半透明的玫瑰金平凸透镜。低频透镜由确认后的底鼓式冲击驱动，中高频透镜平滑响应各自频段；鼓点在最大透镜的凸面顶点高度激发环形粒子涟漪。
 
-## Live features
+原生 **WebGL 1 + Web Audio API**，网页运行无需依赖、构建或外部资源。音乐文件和麦克风声音仅在浏览器本地分析。
 
-- Upload a local MP3/WAV/OGG/M4A audio file, play/pause, seek, or drag and drop.
-- Microphone input for live sound (HTTPS or localhost; browser permission required).
-- Built-in *silent simulated beat* so the visual can be explored without a song. This mode is **not** real audio analysis.
-- FFT with distinct bands for bass (35–180 Hz), mid (180–1900 Hz), and high (1900–10000 Hz), plus actual **time-domain RMS loudness** (not FFT average).
-- Attack/release smoothing (loudness: 45/260 ms, bass: 80/320 ms, mid: 180/550 ms, high: 25/130 ms).
-- Overall RMS loudness → visible `glow` and soft outer `aura`; bass → gentle `size` breathing; mid → `film` and `hueOff`; high → subtle `fringe` detail only.
-- **Drum-like onset detection**: a fast/slow bass-weighted envelope contrast with rising-edge threshold, cooldown and impact strength estimation. Demo mode generates synthetic beat events; music and microphone mode analyze real sound.
-- **Damped elastic surface waves**: each beat changes the velocity of two spring oscillators, whose displacement smoothly deforms each droplet's GLSL signed distance with two angular harmonics and individual phase offsets. The ripple oscillates and decays instead of instantly jumping to a new silhouette.
-- Adjustable wave strength (0–160%), manual **Test Strike** button, and beat indicator/count. OS `prefers-reduced-motion` disables the waves.
-- The `merge` and `spread` topology parameters **never depend on audio**, which minimizes the abrupt neck changes observed when droplets approach.
-- Sliders for sensitivity, visual response, and independent orbital motion speed.
-- Audio stays entirely on the user's machine. No uploads, analytics, cookies, or third-party scripts.
+## 内置体验歌单
 
-## Run locally
+五首 MP3 已作为真实文件放在 `audio/` 中并纳入 Git，无需访问原电脑的 Downloads 目录或外部音乐服务。完整克隆仓库后，按“本地运行”启动静态服务器即可播放；部署时请一并保留 `audio/`。
 
-Open `index.html` in a browser. For microphone access use `http://localhost` or HTTPS, e.g.:
+| 曲目 | 项目内文件 |
+| --- | --- |
+| Rivers In the Desert | `audio/rivers-in-the-desert.mp3` |
+| 星と僕らと — Lyn / アトラスサウンドチーム | `audio/hoshi-to-bokura-to.mp3` |
+| 远航星的告别 | `audio/yuan-hang-xing-de-gao-bie.mp3` |
+| 新长征路上的摇滚 | `audio/xin-chang-zheng-lu-shang-de-yao-gun.mp3` |
+| Hello | `audio/hello.mp3` |
 
-```bash
-python3 -m http.server 8000
-# Visit http://localhost:8000/
+默认选中第一首并等待点击播放。支持选曲、上一首、下一首、暂停、进度定位；曲终自动顺序续播，最后一首结束后回到第一首。切换本地文件或麦克风时停止歌单，返回歌单保留上次选曲。五首文件合计约 62 MB，使用普通 Git 保存，不需要 Git LFS。
+
+## 坐标与视角
+
+**场景 Y 轴正方向：大透镜圆心 → 小透镜圆心。** 这个方向不随观察视角改变。三片透镜的平面朝向 +Y，凸面朝向 −Y；透镜厚度从平面往 −Y 延伸。
+
+在画面上用鼠标或单指拖动旋转视角，可以绕到透镜背面。双击画面、点击“恢复视角”或按 Home 恢复默认视角；画面获得键盘焦点后可用方向键旋转。音频只控制透镜的场景 Y 坐标，不控制相机。页面其他区域仍可正常滚动。
+
+## 动效映射
+
+| 频段 | 透镜 | 响应 |
+| --- | --- | --- |
+| 35–180 Hz | 最大 / −Y 一侧 | 仪表显示低频；透镜位移与涟漪仅响应确认的鼓点式冲击 |
+| 180–1900 Hz | 中等 / 中间 | 沿共同轴线改变间距 |
+| 1900–10000 Hz | 最小 / +Y 一侧 | 沿共同轴线改变间距 |
+| 全频时域 RMS | 响度仪表 | 监测整体响度 |
+
+- 三片透镜的中心始终是同一法向量的标量倍数。大小比例固定为 **1 : 0.76 : 0.54**，不会随音频换序或绕轴偏移。厚度与间距还有最小净距约束。
+- 真实三维网格包含平面、球冠凸面和有厚度的环形侧壁。默认中心厚度为 0.50，边缘保留中心厚度的 20%；按翻转后的朝向约束间隙。移除了上下表面的两个独立圆环描边，改为侧壁内部导光与柔和外溢光，导光强度可调。
+- 默认配色与恢复默认均为**暮光玫瑰**，粗主反射与频谱粒子采用粉铜色；保留其他五种配色以便手动比较。侧壁导光单独降低饱和度，默认系数 0.18，呈较中性的珍珠白，避免侧壁变成浓金色或粉色。
+- 材质使用 **unlit 自定义片元着色器**：根据观察方向、三维表面法线计算 `reflect()`，将反射射线与场景中的有限尺寸玫瑰金/白色灯箱求交。每片透镜只保留朝向观察者表面的一对粗主反射，取消透过背面叠出的两条细副光带；拖到背面时凸面接替平面显示主反射。没有使用反射图片或固定在 UV 上的条纹。
+- **透镜之间的倒影**使用单次解析反射：射线求交当前三片透镜的平面、缩放球冠与圆柱侧壁，忽略自身并选取最近交点，再计算被反射透镜的导光与灯箱高光。中频透镜可反射在低频透镜上，高频透镜可反射在中频透镜上；倒影跟随视角、间距、厚度和音乐位移变化。它是实时的一次反射近似，没有完整多次内反射、透射路径或背景折射。
+- 每片透镜的**平面菲涅尔亮边**使用着色器中的边缘微倒角法线和 Schlick 形式的角度响应。边缘整圈微亮，掠射方向更亮，亮弧随观察方向移动；可以独立调节或关闭。
+- 继续使用现有 Web Audio 输入、2048 点 FFT、三频段范围、时域 RMS 和 attack/release 平滑。频谱改为 `getFloatFrequencyData()`，避免字节频谱在 −20 dB 处截平。显示端使用各频段独立慢速参考和软压缩，不再先硬截到 100 再计算变化。
+- 音频分析以约 24 ms 的固定间隔独立于画面刷新采样，接近 2048 点 FFT 窗口的一半；每次采样立即处理起音，避免复杂材质降低画面帧率时漏掉瞬态。
+- 低频检测直接读取未经过显示压缩的能量，重点分析 45–120 Hz 的底鼓主体：结合上升速度、频谱同向增长、峰值显著度和冲击持续能量，并在密集混音中参考同时发生的打击性中高频起音。确认窗口约 75–120 ms，默认最短间隔 **300 ms**，避免每个低频波动都发圈。强而清晰的低频冲击仍可独立通过。
+- 低频透镜的位移和闪光不由持续低频音量驱动，只响应确认后的冲击。三片透镜保留接近临界阻尼的平滑响应；在此基础上，中频运动默认放大 **2 倍**、高频放大 **2.25 倍**，各有独立倍率，不提高低频检测灵敏度。全局运动幅度为 **70%**、鼓点识别灵敏度 **1.45×**。
+- 检测属于保守的鼓点式瞬态判定，不是鼓声源分离或 BPM 网格追踪。混音很密或底鼓很轻时可能少触发，带强攻击的其他低音乐器仍可能与底鼓相似。按曲目调整识别灵敏度与最短间隔；浮点频谱与显示软压缩仍保留强音动态。
+- 每圈涟漪保存触发时 **35 Hz–10 kHz 的 96 段对数频谱**。频段能量映射为粒子沿场景 +Y 的高度，再镜像展开到环形圆周，避免首尾断缝。不是用三个频段平均值伪造频谱。
+- 涟漪的发射平面位于触发时低频透镜的**凸面顶点**：`Y = 低频透镜平面 Y − 中心厚度 × 尺寸`，相对旧版向 −Y 移动一个透镜高度，并保存该位置。环形波前向四周扩散、沿 +Y 抬升，频谱起伏高度随距离增长，透明度单独衰减。后续频谱与透镜运动不会改写已发出的波前。
+- 每圈粒子从 384×12＝4,608 个提高到 **576×16＝9,216 个（2 倍）**，同时略降单粒子透明度，增加密度而不过度叠亮。同屏最多六圈，复用 GPU 缓冲区；生命周期按真实经过时间计算，不因较低帧率被拉长。
+- 六套原有配色、音乐上传、播放暂停、拖放、进度定位与麦克风输入继续可用。体验模式改为**内置五首真实音乐的歌单**，复用同一套实时分析；暂停时不会生成模拟鼓点。
+- 控制台可调透镜构图、厚度、反射率、不透明度、透镜间反射、平面菲涅尔、侧壁导光强度/饱和度、灯箱宽度、中高频独立运动倍率、涟漪强度/速度/寿命/Y 轴高度/扩散增高倍率/+Y 抬升速度；支持单圈手动预览与恢复默认。透明透镜会随视角切换绘制顺序。
+- 系统开启“减少动态效果”时暂停音频轴向运动与粒子涟漪。WebGL 不可用时显示带状态提示的三透镜 CSS 简化预览；上下文恢复时重新初始化页面。
+
+## 调得更平静
+
+- **透镜运动幅度**只调整位移与回弹，不降低音乐音量；默认 70%，可试 25%–35%，设为 0 可暂停运动。
+- **鼓点识别灵敏度**默认 1.45×；越低越保守，可试 0.70×。
+- **鼓点最短间隔**默认 300 ms；可试 500–600 ms 降低发圈密度。
+- **频谱显示增益**不再兼任鼓点灵敏度；**涟漪强度**单独调整波前强弱。
+- 如果只想加强中高频，在模块参数中调整**中频运动倍率 / 高频运动倍率**，不必提高鼓点识别灵敏度。材质较繁忙时可降低**透镜之间的反射**或**平面菲涅尔亮边**。
+
+## 本地运行
+
+在项目目录启动静态服务器（内置歌单通过同源 HTTP/HTTPS 加载，避免 `file://` 的 Web Audio 限制）：
+
+```powershell
+python -m http.server 8000 --bind 127.0.0.1
 ```
 
-## Publish using GitHub Pages
+访问 <http://localhost:8000/>。麦克风需要 localhost 或 HTTPS，且需浏览器授权。点击“体验歌单”或任意曲目开始播放，也可选择自己的本地音乐。页面不会自动播放声音。
 
-1. Create a **public** repository named `fluidglow-audio` on GitHub.
-2. Upload **all the files** from this project to the repository root (including `index.html`, `fluidglow.js`, `app.js`, `styles.css`, and `LICENSE`).
-3. Open repository **Settings → Pages → Build and deployment** and choose **Deploy from a branch**, branch **main**, folder **/(root)**, then Save.
-4. The site URL will be `https://YOUR-USERNAME.github.io/fluidglow-audio/` after Pages finishes deploying.
+## 文件
 
-No build step, configuration files or third-party services are needed.
+- `lenses.js`：v2 透镜网格、材质着色器、轴向运动及粒子波前渲染器。
+- `audio-dynamics.js`：浮点频谱动态范围、未截断的起音检测和 96 段频谱快照；可在 Node 中独立验证。
+- `audio/`：随仓库分发的五首体验歌单音频，使用相对路径加载。
+- `tests/playlist.cjs`：逐首验证实际 MP3 解码、FFT 响应、自动续播、模式切换和默认设置。
+- `app.js`：内置歌单、音频输入、FFT/RMS 数据采集、信号平滑、三频回弹/低频涟漪与交互控制。
+- `index.html` / `styles.css`：界面、参数面板及降级预览。
+- `fluidglow.js`：保留的原版 FluidGlow 衍生渲染器，v2 页面不再加载。
+- `tests/visualizer.cjs`：真实 WebGL/Web Audio 浏览器回归，现场生成合成音频，验证材质与检测；不使用真实麦克风。
+- `tests/audio-dynamics.cjs`：复现旧三频满格与字节 FFT 上限，验证软压缩与起音检测仍保留动态。
 
-## Design notes
+## 开发验证（可选）
 
-Audio does not control orbital centers or the smooth-minimum merge threshold. Instead, the shader continuously evolves and the audio modifies its perceived energy (subtle radius pulsation, oil-film interference width/color, rim brightness and an outer aura). The v1.1 iteration switched primary luminance to time-domain RMS and added a dedicated loudness meter. **v1.2** adds beat-triggered, damped surface deformation while retaining stable orbital centres and smooth-union threshold. A corrected edge smoothstep avoids relying on undefined reversed-edge behavior. All incoming spectral energy passes through an attack/release exponential envelope using delta time.
+网页本身无需安装 npm 依赖。运行浏览器回归时：
 
-The elastic ripples are a visual SDF deformation, not a full fluid simulation. Viscous flow and physical mass-conserving merging remain out of scope. Transient detection is heuristic; sensitivity will vary by recording and music style.
+```powershell
+npm install
+npx playwright install chromium
+npm test
+```
 
-## Credits and license
+也可用环境变量 `PLAYWRIGHT_BROWSER_EXECUTABLE` 指定已有 Chromium/Edge 可执行文件。歌单回归逐首验证项目内真实 MP3。材质与音频回归包括：主反射与背面副光带隔离、只绘制接收面时相邻透镜仍可反射、移动被反射透镜后倒影变化、平面菲涅尔亮弧随视角移动、侧壁色度下降、中高频 2×/2.25× 增益、9,216 粒子及凸面顶点发射位置，以及全部已有音频、视角、涟漪、移动端和降级回归。报告与截图写入被 Git 忽略的 `test-results/`。设置 `TEST_FOCUS=drums` 可仅执行密集混音与无鼓点背景的浏览器对照。
 
-- `fluidglow.js`: based on original source by **Stéphane Drozdz** under MIT. See `LICENSE` and [upstream](https://github.com/stephanezdz/fluidglow).
-- `app.js`, `styles.css`, `index.html`: custom music-reactive application and interface created for this project. Distributed under the same MIT license.
+## 发布与版本
 
-## v1.2.1 shader visibility regression fix
+静态文件可直接发布到 GitHub Pages，无构建步骤。参见 [DEPLOY.md](DEPLOY.md)。静态资源版本号为 `2.5.0`，防止与旧渲染器混合缓存。
 
-**Root cause**: The v1.2 GLSL ES 1.00 shader indexed the C/R arrays with the function parameter `i` from `dropSdf(vec2 p, int i)`. Browser WebGL compilation failed with `'i' : Index expression can only contain const or loop symbols`. Rendering continued with an invalid program, leaving the canvas blank.
+v2 替换了 v1.4 的四油滴、融合、油膜及弹性表面形变。旧版频率分析、播放器与黑金配色继续复用；旧版源文件保留，方便对照。
 
-Fixes:
-- Unroll the four metaball SDF calls with constant indices and pass center, radius, and numeric phase directly to the helper.
-- Check both GLSL compilation and program link status. When the elastic-wave shader fails, try a stable non-wave version.
-- If WebGL cannot render at all, show an explicit fallback/status rather than leaving an unexplained black canvas; recover from WebGL context restoration.
-- Bust cached script/style URLs to `?v=1.2.1` so GitHub Pages clients do not mix versions.
+## 许可与致谢
 
-The bass/mid/high/RMS audio mapping, drum onset detection, damped wave integration, and constant merge/spread settings remain unchanged.
-
-Browser regression: Chromium with real ANGLE/SwiftShader WebGL showed no visible liquid and console GLSL errors in v1.2; v1.2.1 rendered liquid and exposed no compilation errors.
-
-
-## v1.3.0 — Drum detection, autonomous shape, and complete editor
-
-- **Why real beats were missed in v1.2:** FFT smoothing (0.62), a gate on frequency-band energy, and a fixed minimum low-band drive (`drive > 0.18`) eliminated many audible but short percussion attacks, especially in mastered material.
-- **Detection fix:** positive weighted spectral flux in the original ungated FFT bins at 35–2600 Hz; the noise floor follows each track using a slow baseline, hysteresis, a 200 ms cooldown, and user-tunable beat sensitivity. The panel displays `FLUX / threshold` for diagnosis. This is a transient detector, not a tempo or beat-grid tracker.
-- **Autonomous `u_surfaceMotion`:** a dedicated on/off switch smoothly enables slow SDF harmonics using an independent GPU time uniform. **No FFT frequency, loudness or beat parameter** feeds this effect.
-- **Elastic wave switch:** separately enables/disables existing damped beat-driven surface waves. The manual test strike continues to work when enabled.
-- **FluidGlow module inspector:** all 20 baseline sliders are adjustable, arranged by shape, optics and motion; `waveA / waveB` are live read-only outputs, and `surfaceMotion` is controlled by its switch. Audio offsets are applied on top of manual baselines. Manual `merge / spread` controls can change how droplets join, but are never mapped to music.
-- **Safety:** keep WebGL 1 constant-index SDF calls, compile/link validation and safe shader fallback. Stage height stays bounded while the inspector is expanded. Static asset versions are `1.3.0`.
-
-Synthetic kick/snare comparison during local testing (one 6-second clip with 11 impulses): old detector registered around 3 events; v1.3.0 registered around 9. Counts are illustrative and depend on the audio mix and playback timing.
-
-## v1.4.0 — black gold palettes and treble illumination
-
-- `glow` and `aura` now use high-frequency energy (1900–10000 Hz), with 30 ms attack / 190 ms release and perceptual compression. RMS is still displayed but no longer drives illumination.
-- Shader palette uniforms `u_paletteA/B/C`, `u_paletteBg` and `u_paletteMode` tint oil-film, rim highlights, and glow. Palette changes crossfade over ~400 ms.
-- Switchable palettes: Champagne Noir, Rose Obsidian, Gilded Onyx, Pearl Champagne, Bronze Rosé, and Original Prism for comparison.
-- Existing beat detection, elastic waves, autonomous surface motion, and full FluidGlow manual parameter panel are preserved; colors never control merge or spread.
+项目源代码使用 MIT，见 [LICENSE](LICENSE)。示例歌曲不属于源代码的 MIT 授权范围。原版 [FluidGlow](https://github.com/stephanezdz/fluidglow) 作者为 **Stéphane Drozdz**，保留其源文件与版权信息。`lenses.js` 为本项目新增渲染器。
