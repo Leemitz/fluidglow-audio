@@ -5,7 +5,7 @@
   'use strict';
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5,
-    reflection: .5, opacity: .48, glow: 1.35, aura: .20, roughness: .13, edgeGlow: 1.25,
+    reflection: .5, opacity: .48, glow: 1.35, whiteLight: .55, aura: .20, roughness: .13, edgeGlow: 1.25,
     interReflection: .70, fresnelEdge: .85, edgeSat: .18, lightLayout: 1,
     convexFrost: .78, faceTransition: 18, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
@@ -42,7 +42,7 @@
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset;
+      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -180,7 +180,7 @@
       float fr=.04+.96*pow(1.0-abs(dot(n,-d)),5.0);
       float rim=smoothstep(.89,.995,length(point.xz)/picked.x);
       vec3 color=u_paletteC*.07+(u_paletteB*bars.x*.85
-        +mix(u_paletteA,vec3(1.0),.7)*bars.y*.95)*u_light+guideTint()*rim*.60*u_edgeGlow;
+        +mix(u_paletteA,vec3(1.0),.7)*bars.y*.95*u_whiteLight)*u_light+guideTint()*rim*.60*u_edgeGlow;
       if(part<.5)color=mix(color,frostTint()*.32,u_convexFrost*.55);
       if(part>1.5)color=guideTint()*(.65+.35*fr)*u_edgeGlow;
       float coverage=(.14+.35*fr+.28*rim+.25*max(bars.x,bars.y))/(1.0+.10*hit.x*hit.x);
@@ -203,7 +203,7 @@
       vec3 tint = u_paletteB;
       if (u_paletteMode < .5) tint = .55 + .45 * cos(vec3(0.0, 2.1, 4.2) + n.y * 3.0 + n.x * 2.0);
       vec3 col = u_paletteC*(.025+.08*fresnel)
-        + (tint*warm*.95 + mix(u_paletteA,vec3(1.0),.70)*cool*1.05)*u_light;
+        + (tint*warm*.95 + mix(u_paletteA,vec3(1.0),.70)*cool*1.05*u_whiteLight)*u_light;
       col = mix(vec3(dot(col, vec3(.299, .587, .114))), col, u_sat);
       col *= u_glow * (1.0 + u_energy * .30);
       float alpha = u_opacity * (.07 + fresnel * .25)
@@ -553,7 +553,7 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
       // Orbit can pass behind the lenses. Re-sort transparent objects and
