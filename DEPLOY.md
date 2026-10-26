@@ -1,4 +1,4 @@
-# 发布 FluidGlow Audio v2.7 到 GitHub Pages
+# 发布 FluidGlow Audio v2.7.1 到 GitHub Pages
 
 仓库：<https://github.com/Leemitz/fluidglow-audio>
 
@@ -21,4 +21,4 @@ Pages 预计地址：<https://leemitz.github.io/fluidglow-audio/>。是否已发
 7. 恢复默认应为暮光玫瑰配色、运动幅度 70%、鼓点灵敏度 1.45×、间隔 300 ms，中/高频运动倍率 2×/2.25×；低频鼓点规则保持不变。光源默认平行多光带，扩散减速程度默认 3，凸面磨砂程度 0.78，正反面过渡半角 18°。切换配色、手机竖屏与减少动态效果继续正常。
 8. 麦克风在 HTTPS/localhost 环境下请求浏览器权限；音频仅在本地分析。
 
-如需自动回归，按 README 的开发验证步骤运行 `npm test`。发布后检查资源 URL 的 `v=2.7.0`，并确认 `lenses.js` 及五首 `audio/*.mp3` 返回成功。音频使用项目相对路径，GitHub Pages 子目录也可运行；请通过 HTTP/HTTPS 打开。
+如需自动回归，按 README 的开发验证步骤运行 `npm test`。发布后检查资源 URL 的 `v=2.7.1`，并确认 `lenses.js` 及五首 `audio/*.mp3` 返回成功。音频使用项目相对路径，GitHub Pages 子目录也可运行；请通过 HTTP/HTTPS 打开。
