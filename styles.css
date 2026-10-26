@@ -111,3 +111,11 @@
 .skip-btn{border:0;background:transparent;color:#c9b4ae;width:24px;height:32px;font-size:23px;border-radius:6px}
 .skip-btn:hover{background:#ffffff0c;color:#f3d2a7}
 .playlist-track:focus-visible,.skip-btn:focus-visible,.play-btn:focus-visible{outline:1px solid #bf866d;outline-offset:1px}
+
+.light-layout-controls{margin-top:20px}
+.light-layout-title{display:block;font-size:11px;color:#c6b7b2;margin-bottom:10px}
+.light-layout-picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.light-layout-picker button{border:1px solid #bf866d30;border-radius:7px;padding:9px 4px;background:#ffffff04;color:#a99d9b;font-size:10px}
+.light-layout-picker button[aria-pressed="true"]{border-color:#bf866d;background:#bf866d20;color:#f3d2a7}
+.light-layout-picker button:focus-visible{outline:1px solid #f3d2a7;outline-offset:2px}
+.light-layout-controls p{font-size:9px;color:#8f8689;line-height:1.7;margin:9px 0 0}

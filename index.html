@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#090b11">
   <meta name="description" content="FluidGlow Audio — 三片同轴半透平凸透镜，由低中高频驱动，低频激发环形频谱粒子涟漪。">
   <title>FluidGlow Audio — Spectral Lenses</title>
-  <link rel="stylesheet" href="styles.css?v=2.5.0">
+  <link rel="stylesheet" href="styles.css?v=2.6.0">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -77,6 +77,15 @@
       </section>
       <details class="module-panel" id="fluid-params">
         <summary><span><strong>透镜与涟漪参数</strong><small>构图、半透材质、频谱波前 · 手动微调</small></span><span class="module-arrow">⌄</span></summary>
+        <div class="light-layout-controls">
+          <span class="light-layout-title">反射光源形状</span>
+          <div class="light-layout-picker" role="group" aria-label="反射光源形状">
+            <button type="button" data-light-layout="1" aria-pressed="true">多向光带</button>
+            <button type="button" data-light-layout="2" aria-pressed="false">同心光环</button>
+            <button type="button" data-light-layout="0" aria-pressed="false">经典双光带</button>
+          </div>
+          <p>光带与光环环绕透镜布置，拖动视角可比较反射的变化。</p>
+        </div>
         <div id="fluid-parameter-list" class="module-controls"></div>
         <p class="module-footnote">三片透镜沿同一轴线响应各自频段。涟漪高度来自 35 Hz–10 kHz 的对数频谱，发出后逐渐放大、淡出；同屏最多六圈。</p>
       </details>
@@ -89,15 +98,15 @@
       <div class="view-legend"><span class="legend-cross">＋</span><span>OPTICAL STUDY <i>001</i></span></div>
       <div class="view-controls"><span id="view-drag-hint">拖动旋转 · 双击复位</span><button id="reset-view-btn" type="button" title="恢复默认观察方向（键盘 Home）">↺ 恢复视角</button></div>
       <div class="axis-note">Y+ <span>大透镜 → 小透镜</span></div>
-      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.5.0</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
+      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.6.0</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
       <div class="view-bottom"><span>THREE LENSES / ONE AXIS / SPECTRAL RIPPLES</span><span class="movement-indicator"><i></i> COAXIAL MOTION</span></div>
       <div class="drop-hint" id="drop-hint"><span>♫</span> 松开以载入音乐文件</div>
     </div>
   </main>
   <div id="toast" role="status" aria-live="polite"></div>
   <audio id="player" preload="metadata"></audio>
-  <script src="audio-dynamics.js?v=2.5.0"></script>
-  <script src="lenses.js?v=2.5.0"></script>
-  <script src="app.js?v=2.5.0"></script>
+  <script src="audio-dynamics.js?v=2.6.0"></script>
+  <script src="lenses.js?v=2.6.0"></script>
+  <script src="app.js?v=2.6.0"></script>
 </body>
 </html>

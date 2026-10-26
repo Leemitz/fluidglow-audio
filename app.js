@@ -70,7 +70,8 @@
     { title: '波前与光照 / WAVEFRONTS', fields: [
       ['midMotion', '中频运动倍率', .5, 3.5, .1],
       ['highMotion', '高频运动倍率', .5, 3.5, .1],
-      ['rippleSpeed', '涟漪扩散速度', .3, 1.6, .02],
+      ['rippleSpeed', '涟漪平均扩散速度', .3, 1.6, .02],
+      ['rippleDrag', '扩散减速程度', 0, 6, .1],
       ['rippleLife', '涟漪寿命（秒）', 1.2, 5, .1],
       ['rippleHeight', 'Y 轴频谱高度', .2, 1.8, .02],
       ['rippleGrowth', '扩散增高倍率', .1, 2, .05],
@@ -484,6 +485,18 @@
   }
   buildPalettePicker();
 
+  function updateLightLayout() {
+    for(const button of document.querySelectorAll('[data-light-layout]'))
+      button.setAttribute('aria-pressed',String(Number(button.dataset.lightLayout)===PARAMS.lightLayout));
+  }
+  for(const button of document.querySelectorAll('[data-light-layout]')) {
+    button.addEventListener('click',()=>{
+      PARAMS.lightLayout=Number(button.dataset.lightLayout);
+      updateLightLayout();
+    });
+  }
+  updateLightLayout();
+
   function buildParameterPanel() {
     const holder = $('fluid-parameter-list');
     for (const group of PARAM_GROUPS) {
@@ -540,6 +553,7 @@
     $('wave-enabled').checked = true; $('wave-enabled').dispatchEvent(new Event('change'));
     $('surface-enabled').checked = false; $('surface-enabled').dispatchEvent(new Event('change'));
     Object.assign(PARAMS, PARAM_DEFAULTS);
+    updateLightLayout();
     glow.resetView();
     selectedPalette=DEFAULT_PALETTE;
     glow.setPalette(paletteUniforms(selectedPalette));

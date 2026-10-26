@@ -6,9 +6,9 @@
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6,
     reflection: .5, opacity: .48, glow: 1.35, aura: .20, roughness: .13, edgeGlow: 1.25,
-    interReflection: .70, fresnelEdge: .85, edgeSat: .18, midMotion: 2.0, highMotion: 2.25,
+    interReflection: .70, fresnelEdge: .85, edgeSat: .18, lightLayout: 1, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
-    rippleSpeed: .78, rippleLife: 3.4, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
+    rippleSpeed: .78, rippleLife: 3.4, rippleDrag: 3, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
     zoom: 1, posX: 0, posY: .08, motionGain: .70
   });
   const INITIAL_PALETTE = {
@@ -41,7 +41,7 @@
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_frontSurface, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat;
+      u_edgeGlow, u_frontSurface, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat, u_lightLayout;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -52,7 +52,7 @@
       vec3 tint=mix(u_paletteB,u_paletteA,.40);
       return mix(vec3(dot(tint,vec3(.299,.587,.114))),tint,u_edgeSat);
     }
-    vec2 studioBarsLocal(vec3 p,vec3 r,float curved) {
+    vec2 classicBars(vec3 p,vec3 r,float curved) {
       if (abs(r.y) < .025) return vec2(0.0);
       float t = (sign(r.y) * 2.8 - p.y) / r.y;
       if (t <= 0.0) return vec2(0.0);
@@ -64,6 +64,42 @@
       float whiteWidth = (.07*u_bandWidth + .12*u_roughness)*curveWidth;
       return endFade * vec2(exp(-.5*pow((abs(hit.z)-4.55-drift)/roseWidth,2.0)),
         exp(-.5*pow((abs(hit.z)-3.55)/whiteWidth,2.0)));
+    }
+    float periodicDistance(float value,float period) {
+      return abs(mod(value+period*.5,period)-period*.5);
+    }
+    vec2 studioBarsLocal(vec3 p,vec3 r,float curved) {
+      if(u_lightLayout<.5)return classicBars(p,r,curved);
+      // Intersect an enclosing studio box. Its six faces carry actual finite
+      // light panels, covering axial and side directions without a texture.
+      // A planar receiver still sees perspective/parallax in these sources.
+      vec3 distances=(vec3(4.2)-sign(r)*p)/max(abs(r),vec3(.0001));
+      float t=min(distances.x,min(distances.y,distances.z));
+      if(t<=0.0)return vec2(0.0);
+      vec3 hit=p+r*t;
+      vec2 uv=distances.y<=distances.x&&distances.y<=distances.z ? hit.xz
+        : distances.x<=distances.z ? hit.zy : hit.xy;
+      float drift=.10*sin(u_time*.12)*u_surfaceMotion;
+      float curvedWidth=mix(1.0,1.45,curved);
+      vec2 distanceToLight,width;
+      if(u_lightLayout<1.5){
+        // Three rose/white pairs across each face. Opposite walls keep the
+        // same layout, so the convex side also works when orbiting behind.
+        distanceToLight=vec2(periodicDistance(uv.y+.65-drift,2.6),
+          periodicDistance(uv.y-.65,2.6));
+        width=vec2(.12*u_bandWidth+.20*u_roughness,
+          .09*u_bandWidth+.12*u_roughness)*curvedWidth;
+      }else{
+        // Annular emitters live in the studio, not in the lens's own UVs.
+        // The circles become displaced arcs as the reflected view changes.
+        float radial=length(uv);
+        distanceToLight=vec2(periodicDistance(radial-.35-drift,1.4),
+          periodicDistance(radial-1.05,1.4));
+        width=vec2(.060*u_bandWidth+.10*u_roughness,
+          .047*u_bandWidth+.08*u_roughness)*curvedWidth;
+      }
+      vec2 falloff=distanceToLight/max(width,vec2(.025));
+      return exp(-.5*falloff*falloff);
     }
     // Exact one-bounce intersections with the same scaled spherical cap,
     // flat disk and cylindrical sidewall used by the rasterized lens mesh.
@@ -129,8 +165,8 @@
       if (dot(n,view) < 0.0) n = -n;
       float fresnel = pow(1.0 - abs(n.z), 3.0);
       vec3 p=sceneVector(v_position),ray=sceneVector(reflect(-view,n));
-      // One primary pair per lens. The far transparent face must not add
-      // the narrow ghost pair visible through the near face in v2.2.
+      // Only the near surface supplies the studio reflections. The far
+      // transparent face must not add the narrow ghost bands from v2.2.
       vec2 bars = abs(u_surface-u_frontSurface) < .5
         ? studioBarsLocal(p,ray,1.0-step(.5,u_surface)) : vec2(0.0);
       float warm = bars.x, cool = bars.y;
@@ -178,12 +214,12 @@
     attribute float a_lane, a_seed, a_height;
     uniform vec2 u_res, u_pan;
     uniform vec3 u_diskX, u_diskZ, u_axisY;
-    uniform float u_zoom, u_age, u_life, u_speed, u_radius, u_depth,
+    uniform float u_zoom, u_age, u_life, u_travel, u_radius, u_depth,
       u_height, u_growth, u_rise, u_strength, u_dpr;
     varying float v_alpha, v_seed;
     void main() {
       float life = clamp(u_age / u_life, 0.0, 1.0);
-      float travel = u_age * u_speed;
+      float travel = u_travel;
       float radius = u_radius + travel + a_lane * (.035 + life * .22);
       float crest = sin(a_lane * 3.14159265);
       // Both the ring's baseline and its captured FFT profile grow along +Y
@@ -214,6 +250,13 @@
     for (const k of ['a', 'b', 'c', 'bg']) result[k] = (value[k] || INITIAL_PALETTE[k]).slice();
     result.mode = value.mode === undefined ? 1 : value.mode;
     return result;
+  }
+  // Normalized exponential ease-out: changing drag changes the speed curve,
+  // while lifetime and total travel (average speed * lifetime) stay fixed.
+  function rippleDistance(r) {
+    const phase=Math.max(0,Math.min(1,r.age/r.life));
+    const progress=r.drag<.001 ? phase : Math.expm1(-r.drag*phase)/Math.expm1(-r.drag);
+    return r.speed*r.life*progress;
   }
   function LensRenderer(options = {}) {
     const P = { ...DEFAULTS };
@@ -395,7 +438,7 @@
       r.age = 0; r.bornAt=performance.now();r.strength = Math.max(.1, Math.min(1.4, strength));
       r.depth = depths[0]-P.thickness*radii[0]*P.size;
       r.radius = radii[0] * P.size;
-      r.life = P.rippleLife; r.speed = P.rippleSpeed; r.height = P.rippleHeight;
+      r.life = P.rippleLife; r.speed = P.rippleSpeed; r.drag=Math.max(0,P.rippleDrag); r.height = P.rippleHeight;
       r.growth = P.rippleGrowth; r.rise = P.rippleRise; r.maxSample = 0;
       // Capture the FFT at impact; later audio cannot rewrite a travelling ring.
       let at = 0;
@@ -452,7 +495,8 @@
         if(!Number.isFinite(r.age))continue;
         r.age=Math.max(0,(now-r.bornAt)/1000);
         if(r.age>=r.life)continue;
-        for (const name of ['age', 'life', 'speed', 'radius', 'depth', 'height', 'growth', 'rise', 'strength']) f(particleProgram, name, r[name]);
+        f(particleProgram,'travel',rippleDistance(r));
+        for (const name of ['age', 'life', 'radius', 'depth', 'height', 'growth', 'rise', 'strength']) f(particleProgram, name, r[name]);
         gl.bindBuffer(gl.ARRAY_BUFFER, r.buffer);
         attribute(particleProgram, 'a_circle', 2, 20, 0); attribute(particleProgram, 'a_lane', 1, 20, 8);
         attribute(particleProgram, 'a_seed', 1, 20, 12); attribute(particleProgram, 'a_height', 1, 20, 16);
@@ -460,7 +504,7 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'gamma', 'surfaceMotion', 'bandWidth', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'gamma', 'surfaceMotion', 'bandWidth', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat', 'lightLayout']) f(lensProgram, name, P[name]);
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
       // Orbit can pass behind the lenses. Re-sort transparent objects and
       // their flat/convex surfaces whenever the camera crosses the disk plane.
@@ -497,13 +541,15 @@
       get metrics() {
         const active = ripples.filter(r => r.age < r.life);
         return { depths: depths.slice(), radii: radii.map(r => r * P.size),
-          particlesPerRipple:ANGLES*LANES,sideSaturation:P.edgeSat,
+          particlesPerRipple:ANGLES*LANES,sideSaturation:P.edgeSat,lightLayout:P.lightLayout,
           axisY: axisY.slice(), viewRotation: view.slice(), springDisplacement: springs.map(s => s.x),
           // All extents use the agreed scene Y coordinate, not screen Y.
           lensExtentsY: depths.map((flatY, i) => ({ flatY, convexY: flatY - P.thickness * radii[i] * P.size })),
           rippleProfiles: active.map(r => {
-            const travel = r.age * r.speed, lift = travel * r.rise;
+            const travel = rippleDistance(r), lift = travel * r.rise;
+            const expansionSpeed=r.drag<.001 ? r.speed : r.speed*r.drag*Math.exp(-r.drag*r.age/r.life)/(-Math.expm1(-r.drag));
             return { age: r.age, emissionY:r.depth,radius: r.radius + travel, baseY: r.depth + lift,
+              expansionSpeed,finalRadius:r.radius+r.speed*r.life,life:r.life,
               peakHeight: lift + r.maxSample*r.height*r.strength*Math.sin(Math.floor((LANES-1)/2)*Math.PI/(LANES-1))*(1+travel*r.growth) };
           }), activeRipples: active.length };
       },
