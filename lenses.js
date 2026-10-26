@@ -6,7 +6,8 @@
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6,
     reflection: .5, opacity: .48, glow: 1.35, aura: .20, roughness: .13, edgeGlow: 1.25,
-    interReflection: .70, fresnelEdge: .85, edgeSat: .18, lightLayout: 1, midMotion: 2.0, highMotion: 2.25,
+    interReflection: .70, fresnelEdge: .85, edgeSat: .18, lightLayout: 1,
+    convexFrost: .78, faceTransition: 18, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
     rippleSpeed: .78, rippleLife: 3.4, rippleDrag: 3, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
     zoom: 1, posX: 0, posY: .08, motionGain: .70
@@ -41,7 +42,7 @@
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_frontSurface, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat, u_lightLayout;
+      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat, u_lightLayout, u_convexFrost;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -52,6 +53,7 @@
       vec3 tint=mix(u_paletteB,u_paletteA,.40);
       return mix(vec3(dot(tint,vec3(.299,.587,.114))),tint,u_edgeSat);
     }
+    vec3 frostTint() { return mix(u_paletteA,vec3(1.0),.62); }
     vec2 classicBars(vec3 p,vec3 r,float curved) {
       if (abs(r.y) < .025) return vec2(0.0);
       float t = (sign(r.y) * 2.8 - p.y) / r.y;
@@ -59,7 +61,7 @@
       vec3 hit = p + r * t;
       float endFade = 1.0 - smoothstep(3.2,4.4,abs(hit.x));
       float drift = .10 * sin(u_time*.12) * u_surfaceMotion;
-      float curveWidth = mix(1.0,2.4,curved);
+      float curveWidth = mix(1.0,2.4,curved)+curved*u_convexFrost*2.0;
       float roseWidth = (.12*u_bandWidth + .20*u_roughness)*curveWidth;
       float whiteWidth = (.07*u_bandWidth + .12*u_roughness)*curveWidth;
       return endFade * vec2(exp(-.5*pow((abs(hit.z)-4.55-drift)/roseWidth,2.0)),
@@ -68,11 +70,42 @@
     float periodicDistance(float value,float period) {
       return abs(mod(value+period*.5,period)-period*.5);
     }
+    vec2 filteredStripes(vec2 distanceToLight,vec2 base,float blur,float period) {
+      if(blur<.001){
+        vec2 q=distanceToLight/max(base,vec2(.025));
+        return exp(-.5*q*q);
+      }
+      // Gaussian convolution of a periodic source. Its two low-frequency
+      // harmonics tend to the correct mean as the angular footprint grows,
+      // avoiding repeated fine stripes and moire at grazing cap normals.
+      vec2 variance=base*base+vec2(blur*blur);
+      vec2 harmonic=exp(-19.7392088*variance/(period*period));
+      vec2 second=harmonic*harmonic*harmonic*harmonic;
+      vec2 phase=6.2831853*distanceToLight/period;
+      return max(vec2(0.0),2.5066283*base/period
+        *(vec2(1.0)+2.0*harmonic*cos(phase)+2.0*second*cos(2.0*phase)));
+    }
     vec2 studioBarsLocal(vec3 p,vec3 r,float curved) {
       if(u_lightLayout<.5)return classicBars(p,r,curved);
-      // Intersect an enclosing studio box. Its six faces carry actual finite
-      // light panels, covering axial and side directions without a texture.
-      // A planar receiver still sees perspective/parallax in these sources.
+      float frost=curved*u_convexFrost;
+      if(u_lightLayout<1.5){
+        // Two broad parallel studio planes carry one common X-aligned array.
+        // A flat receiver sees parallel bands at every angle: no cubemap
+        // face changes, rotated panel sets, or crossing stripe directions.
+        if(abs(r.y)<.003)return vec2(0.0);
+        float t=(sign(r.y)*3.2-p.y)/r.y;
+        if(t<=0.0)return vec2(0.0);
+        vec3 hit=p+r*t;
+        float drift=.10*sin(u_time*.12)*u_surfaceMotion;
+        vec2 distanceToLight=vec2(periodicDistance(hit.z+.4-drift,1.6),
+          periodicDistance(hit.z-.4,1.6));
+        vec2 base=vec2(.075*u_bandWidth+.12*u_roughness,.058*u_bandWidth+.10*u_roughness);
+        float blur=frost*(.14+.055*t/max(abs(r.y),.12));
+        float edgeFade=1.0-smoothstep(36.0,48.0,max(abs(hit.x),abs(hit.z)));
+        return filteredStripes(distanceToLight,base,blur,1.6)*edgeFade;
+      }
+      // Ring emitters retain the enclosing studio, with diffuse lobe
+      // broadening only on the convex face.
       vec3 distances=(vec3(4.2)-sign(r)*p)/max(abs(r),vec3(.0001));
       float t=min(distances.x,min(distances.y,distances.z));
       if(t<=0.0)return vec2(0.0);
@@ -80,26 +113,12 @@
       vec2 uv=distances.y<=distances.x&&distances.y<=distances.z ? hit.xz
         : distances.x<=distances.z ? hit.zy : hit.xy;
       float drift=.10*sin(u_time*.12)*u_surfaceMotion;
-      float curvedWidth=mix(1.0,1.45,curved);
-      vec2 distanceToLight,width;
-      if(u_lightLayout<1.5){
-        // Three rose/white pairs across each face. Opposite walls keep the
-        // same layout, so the convex side also works when orbiting behind.
-        distanceToLight=vec2(periodicDistance(uv.y+.65-drift,2.6),
-          periodicDistance(uv.y-.65,2.6));
-        width=vec2(.12*u_bandWidth+.20*u_roughness,
-          .09*u_bandWidth+.12*u_roughness)*curvedWidth;
-      }else{
-        // Annular emitters live in the studio, not in the lens's own UVs.
-        // The circles become displaced arcs as the reflected view changes.
-        float radial=length(uv);
-        distanceToLight=vec2(periodicDistance(radial-.35-drift,1.4),
-          periodicDistance(radial-1.05,1.4));
-        width=vec2(.060*u_bandWidth+.10*u_roughness,
-          .047*u_bandWidth+.08*u_roughness)*curvedWidth;
-      }
-      vec2 falloff=distanceToLight/max(width,vec2(.025));
-      return exp(-.5*falloff*falloff);
+      float radial=length(uv);
+      vec2 distanceToLight=vec2(periodicDistance(radial-.35-drift,1.4),
+        periodicDistance(radial-1.05,1.4));
+      vec2 base=vec2(.060*u_bandWidth+.10*u_roughness,.047*u_bandWidth+.08*u_roughness);
+      float blur=frost*(.14+.045*t/max(max(abs(r.x),abs(r.y)),abs(r.z)));
+      return filteredStripes(distanceToLight,base,blur,1.4);
     }
     // Exact one-bounce intersections with the same scaled spherical cap,
     // flat disk and cylindrical sidewall used by the rasterized lens mesh.
@@ -155,6 +174,7 @@
       float rim=smoothstep(.89,.995,length(point.xz)/picked.x);
       vec3 color=u_paletteC*.07+(u_paletteB*bars.x*.85
         +mix(u_paletteA,vec3(1.0),.7)*bars.y*.95)*u_light+guideTint()*rim*.60*u_edgeGlow;
+      if(part<.5)color=mix(color,frostTint()*.32,u_convexFrost*.55);
       if(part>1.5)color=guideTint()*(.65+.35*fr)*u_edgeGlow;
       float coverage=(.14+.35*fr+.28*rim+.25*max(bars.x,bars.y))/(1.0+.10*hit.x*hit.x);
       return vec4(color,coverage);
@@ -165,10 +185,13 @@
       if (dot(n,view) < 0.0) n = -n;
       float fresnel = pow(1.0 - abs(n.z), 3.0);
       vec3 p=sceneVector(v_position),ray=sceneVector(reflect(-view,n));
-      // Only the near surface supplies the studio reflections. The far
-      // transparent face must not add the narrow ghost bands from v2.2.
-      vec2 bars = abs(u_surface-u_frontSurface) < .5
-        ? studioBarsLocal(p,ray,1.0-step(.5,u_surface)) : vec2(0.0);
+      float convex=1.0-step(.5,u_surface),frost=convex*u_convexFrost;
+      // Blend over an angular interval around edge-on, never a sign test.
+      // The far cap retains its diffuse veil below; only its coherent studio
+      // lobe fades out, so hidden-surface filtering is not paid every frame.
+      float surfaceWeight=convex>.5 ? 1.0-u_faceMix : u_faceMix;
+      vec2 bars=u_surface<1.5&&surfaceWeight>.001
+        ? studioBarsLocal(p,ray,convex)*surfaceWeight : vec2(0.0);
       float warm = bars.x, cool = bars.y;
       vec3 tint = u_paletteB;
       if (u_paletteMode < .5) tint = .55 + .45 * cos(vec3(0.0, 2.1, 4.2) + n.y * 3.0 + n.x * 2.0);
@@ -178,10 +201,24 @@
       col *= u_glow * (1.0 + u_energy * .30);
       float alpha = u_opacity * (.07 + fresnel * .25)
         + u_reflection * (warm * 1.15 + cool * 1.5)*u_light;
-      if(u_surface<1.5&&abs(u_surface-u_frontSurface)<.5&&u_interReflection>.001){
+      float coherentWeight=surfaceWeight*(1.0-frost*.92);
+      // Skip imperceptible coherent images behind the frosted cap. Fade the
+      // contribution to zero before the branch, preserving orbit continuity.
+      if(u_surface<1.5&&coherentWeight>.06&&u_interReflection>.001){
         vec4 other=neighborReflection(p+ray*.004,ray);
-        float amount=u_interReflection*other.a*(.5+.5*u_reflection);
+        float amount=u_interReflection*other.a*(.5+.5*u_reflection)*coherentWeight
+          *smoothstep(.06,.14,coherentWeight);
         col=mix(col,other.rgb*u_glow,amount);alpha+=amount*.35;
+      }
+      if(convex>.5&&frost>.001){
+        // Object-space grain is static on the glass. A diffuse veil and
+        // broadened highlights give the cap a frosted, translucent finish.
+        vec2 cell=floor(v_local.xy*260.0);
+        float grain=fract(52.9829*fract(dot(cell,vec2(.06711,.00583))))-.5;
+        float scatter=.25+.12*abs(n.z);
+        col=mix(col,frostTint()*scatter,frost*.64);
+        col+=frostTint()*grain*.035*frost;
+        alpha+=frost*(.22+.14*fresnel)*(.72+.28*(1.0-u_faceMix));
       }
       // A micro-bevel gives the flat face an angularly varying normal only
       // at its edge. Its Fresnel highlight travels around the rim on orbit.
@@ -192,7 +229,7 @@
         vec3 bn=normalize(u_axisY*(1.0-.80*bevel)+radial*.85*bevel);
         float fr=.04+.96*pow(1.0-abs(dot(bn,view)),5.0);
         float edge=smoothstep(.980,.994,rho);
-        float strength=u_fresnelEdge*edge*(.06+.94*fr);
+        float strength=u_fresnelEdge*edge*(.06+.94*fr)*(.12+.88*u_faceMix);
         col+=mix(u_paletteA,vec3(1.0),.75)*strength*1.10;
         alpha+=strength*.80;
       }
@@ -345,6 +382,11 @@
     const media = window.matchMedia('(prefers-reduced-motion:reduce)');
     let reduce = media.matches, dpr = 1, alive = true, raf, last = performance.now(), time = 0;
     const basisU = [1, 0, 0], basisV = [0, 1, 0], axisY = [0, 0, 1];
+    function faceMix() {
+      const width=Math.sin(Math.max(1,Math.min(45,P.faceTransition))*Math.PI/180);
+      const x=Math.max(0,Math.min(1,(axisY[2]+width)/(2*width)));
+      return x*x*(3-2*x);
+    }
     // A separate camera quaternion rotates the whole scene. Audio changes
     // only axial positions, never the camera or the shared scene Y axis.
     const view = [0, 0, 0, 1];
@@ -504,12 +546,12 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'gamma', 'surfaceMotion', 'bandWidth', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat', 'lightLayout']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'gamma', 'surfaceMotion', 'bandWidth', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
+      f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
       // Orbit can pass behind the lenses. Re-sort transparent objects and
       // their flat/convex surfaces whenever the camera crosses the disk plane.
       const order = axisY[2] >= 0 ? [0, 1, 2] : [2, 1, 0];
-      f(lensProgram,'frontSurface',axisY[2]>=0?1:0);
       for (const i of order) {
         f(lensProgram,'lensIndex',i);
         f(lensProgram, 'radius', radii[i] * P.size); f(lensProgram, 'depth', depths[i]);
@@ -542,6 +584,7 @@
         const active = ripples.filter(r => r.age < r.life);
         return { depths: depths.slice(), radii: radii.map(r => r * P.size),
           particlesPerRipple:ANGLES*LANES,sideSaturation:P.edgeSat,lightLayout:P.lightLayout,
+          faceMix:faceMix(),convexFrost:P.convexFrost,
           axisY: axisY.slice(), viewRotation: view.slice(), springDisplacement: springs.map(s => s.x),
           // All extents use the agreed scene Y coordinate, not screen Y.
           lensExtentsY: depths.map((flatY, i) => ({ flatY, convexY: flatY - P.thickness * radii[i] * P.size })),

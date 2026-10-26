@@ -191,7 +191,17 @@ let browser, server;
     const original=__lens, element=document.createElement('canvas');
     element.id='material-probe'; element.style.cssText='position:fixed;left:0;top:0;width:720px;height:720px;z-index:99';
     document.body.append(element);
+    // Keep the isolated probe's physics clock deterministic. Sampling one
+    // arbitrary frame after an 80ms timeout can miss the spring's peak on a
+    // slow software GPU and falsely report a changed motion multiplier.
+    const nativeFrame=window.requestAnimationFrame;let probeFrame;
+    window.requestAnimationFrame=fn=>{probeFrame=fn;return 0};
     const probe=LensRenderer({canvas:element,maxDpr:1,reflection:1,edgeGlow:0,fresnelEdge:0,interReflection:0});
+    window.requestAnimationFrame=fn=>fn===probeFrame?0:nativeFrame(fn);
+    let probeNow=performance.now();
+    function advance(ms){
+      for(let left=ms;left>1e-6;){const step=Math.min(left,1000/120);probeNow+=step;probeFrame(probeNow);left-=step;}
+    }
     const gl=element.getContext('webgl'), draw=gl.drawArrays.bind(gl), clear=gl.clear.bind(gl);
     let mode='flat', seen=false, lines=0, receiver=0, neighborShift=0;
     gl.clear=(...args)=>{seen=false;clear(...args)};
@@ -212,7 +222,7 @@ let browser, server;
       else if(mode==='side'&&surface>=2)draw(...args);
     };
     async function pixels(){
-      await new Promise(requestAnimationFrame);
+      advance(1000/60);
       const pixels=new Uint8Array(element.width*element.height*4);
       gl.readPixels(0,0,element.width,element.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
       return pixels;
@@ -221,7 +231,10 @@ let browser, server;
     function difference(a,b){let n=0;for(let i=0;i<a.length;i+=4)if(Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2])>12)n++;return n}
     async function brightness(){return bright(await pixels())}
     const flat=await brightness();
-    mode='far';const farGhost=await brightness();mode='flat';
+    // Clear-glass far face must not restore the old narrow ghost pair.
+    // The default frosted cap is intentionally visible as a soft veil.
+    mode='far';probe.setParams({convexFrost:0});const farGhost=await brightness();
+    probe.setParams({convexFrost:.78});mode='flat';
     probe.setParams({reflection:0}); const flatWithoutReflection=await brightness();
     mode='side';probe.setParams({edgeGlow:1.25});const side=await brightness();
     probe.setParams({edgeSat:1});const saturatedSide=await pixels();
@@ -258,7 +271,8 @@ let browser, server;
     probe.setParams({incline:-.55});const tilted=await pixels(),profileB=rimProfile(tilted,-.55);
     const movingFresnel=profileA.reduce((sum,v,i)=>sum+Math.abs(v-profileB[i]),0)/profileA.length;
     probe.setParams({incline:-.97,fresnelEdge:0});
-    const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+    mode='physics'; // State checks do not need to shade a full 720px receiver.
+    const delay=async ms=>advance(ms);
     const bassBefore=probe.metrics.depths[0];
     probe.setAudio({bass:1,mid:0,high:0});await delay(350);
     const volumeDrift=Math.abs(probe.metrics.depths[0]-bassBefore);
@@ -272,14 +286,14 @@ let browser, server;
     await delay(250);
     async function impulseGain(band,multiplier){
       probe.clearMotion();probe.setParams({midMotion:band==='mid'?multiplier:1,highMotion:band==='high'?multiplier:1});
-      await new Promise(requestAnimationFrame);
+      advance(1000/60);
       const index=band==='mid'?1:2,before=probe.metrics.depths[index];
       probe.kick({[band]:1});await delay(80);
       return Math.abs(probe.metrics.depths[index]-before);
     }
     const midBase=await impulseGain('mid',1),midBoost=await impulseGain('mid',2);
     const highBase=await impulseGain('high',1),highBoost=await impulseGain('high',2.25);
-    probe.destroy();element.remove();window.__lens=original;
+    probe.destroy();element.remove();window.__lens=original;window.requestAnimationFrame=nativeFrame;
     return {flat,farGhost,flatWithoutReflection,side,lines,sideChromaRatio,mediumOnBass,mediumReflectionMoves,
       highOnMedium,highReflectionMoves,fresnelPixels,movingFresnel,volumeDrift,drumDisplacement,residual,disabledMotion,
       midGain:midBoost/midBase,highGain:highBoost/highBase};
@@ -333,25 +347,27 @@ let browser, server;
   results.push('Expanding wavefront gains height along +Y, then fades and releases its pool slot');
   await page.locator('#wave-enabled').check();
 
-  const audioCounts = {};
-  for (const [kind, hz] of [['pulses', 75], ['pulses', 6000], ['sustain', 75]]) {
-    await page.locator('#audio-file').setInputFiles(wav(kind, hz));
-    await page.waitForFunction(() => !document.getElementById('player').paused);
-    await page.evaluate(() => { __emissions.length = 0; });
-    await page.waitForFunction(() => document.getElementById('player').ended, null, { timeout: 12000 });
-    const emitted = await page.evaluate(() => __emissions);
-    audioCounts[`${kind}-${hz}`] = emitted.length;
-    console.log(`${kind}-${hz}: ${emitted.length} onsets at ${emitted.map(e => e.time.toFixed(2)).join(', ')}`);
-    if (hz === 75 && kind === 'pulses') {
-      assert(emitted.length >= 5 && emitted.length <= 8, `Expected bass attacks, got ${emitted.length}`);
-      assert(emitted.every(e => e.samples.length === 96));
-      assert(emitted.some(e => Math.max(...e.samples.slice(0, 24)) > Math.max(...e.samples.slice(64)) + .2));
-    } else if (hz === 6000) assert.equal(emitted.length, 0, 'Treble must not emit bass rings');
-    else assert(emitted.length <= 1, 'Sustained bass must not repeatedly emit');
-  }
-  results.push({ realAudioOnsets: audioCounts, spectrum: '96 log-spaced intervals captured at impact' });
+  if(process.env.TEST_FOCUS!=='visual'){
+    const audioCounts = {};
+    for (const [kind, hz] of [['pulses', 75], ['pulses', 6000], ['sustain', 75]]) {
+      await page.locator('#audio-file').setInputFiles(wav(kind, hz));
+      await page.waitForFunction(() => !document.getElementById('player').paused);
+      await page.evaluate(() => { __emissions.length = 0; });
+      await page.waitForFunction(() => document.getElementById('player').ended, null, { timeout: 12000 });
+      const emitted = await page.evaluate(() => __emissions);
+      audioCounts[`${kind}-${hz}`] = emitted.length;
+      console.log(`${kind}-${hz}: ${emitted.length} onsets at ${emitted.map(e => e.time.toFixed(2)).join(', ')}`);
+      if (hz === 75 && kind === 'pulses') {
+        assert(emitted.length >= 5 && emitted.length <= 8, `Expected bass attacks, got ${emitted.length}`);
+        assert(emitted.every(e => e.samples.length === 96));
+        assert(emitted.some(e => Math.max(...e.samples.slice(0, 24)) > Math.max(...e.samples.slice(64)) + .2));
+      } else if (hz === 6000) assert.equal(emitted.length, 0, 'Treble must not emit bass rings');
+      else assert(emitted.length <= 1, 'Sustained bass must not repeatedly emit');
+    }
+    results.push({ realAudioOnsets: audioCounts, spectrum: '96 log-spaced intervals captured at impact' });
 
-  await checkDrumFixtures(page,results);
+    await checkDrumFixtures(page,results);
+  } else results.push('Visual focus: browser audio fixtures are checked separately, not waived');
 
   await page.locator('#playlist-btn').click();
   await page.waitForFunction(() => !document.getElementById('player').paused);
@@ -409,7 +425,7 @@ let browser, server;
   assert.equal(await fallback.locator('.fallback-visual span').count(), 3);
   results.push('WebGL unavailable: labelled three-lens CSS fallback');
   assert.deepEqual(errors, []);
-  fs.writeFileSync(path.join(output, 'validation.json'), JSON.stringify({ passed: true, results, errors }, null, 2));
+  fs.writeFileSync(path.join(output, process.env.TEST_FOCUS==='visual'?'visual-validation.json':'validation.json'), JSON.stringify({ passed: true, results, errors }, null, 2));
   console.log(JSON.stringify({ passed: true, results, errors }, null, 2));
 })().catch(error => { console.error(error); process.exitCode = 1; })
   .finally(async () => { if (browser) await browser.close(); if (server) server.close(); });
