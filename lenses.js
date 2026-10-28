@@ -6,7 +6,7 @@
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5,
     reflection: .5, opacity: .48, glow: 1.35, whiteLight: .55, aura: .20, roughness: .13, edgeGlow: 1.25,
-    interReflection: .70, fresnelEdge: .85, edgeSat: .18, lightLayout: 1,
+    interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
     convexFrost: .78, faceTransition: 18, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
     rippleSpeed: .78, rippleLife: 3.4, rippleDrag: 3, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
@@ -42,7 +42,7 @@
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight;
+      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -184,7 +184,10 @@
       if(part<.5)color=mix(color,frostTint()*.32,u_convexFrost*.55);
       if(part>1.5)color=guideTint()*(.65+.35*fr)*u_edgeGlow;
       float coverage=(.14+.35*fr+.28*rim+.25*max(bars.x,bars.y))/(1.0+.10*hit.x*hit.x);
-      return vec4(color,coverage);
+      // A distant lens cannot reappear at full brightness in another lens's mirror.
+      float reflectedFade=picked.x<(u_lensData1.x+u_lensData2.x)*.5 ? u_highFade
+        : (picked.x<(u_lensData0.x+u_lensData1.x)*.5 ? u_midFade : 1.0);
+      return vec4(color*mix(.72,1.0,reflectedFade),coverage*reflectedFade);
     }
     void main() {
       vec3 n = normalize(v_normal);
@@ -227,6 +230,19 @@
         col+=frostTint()*grain*.035*frost;
         alpha+=frost*(.22+.14*fresnel)*(.72+.28*(1.0-u_faceMix));
       }
+      // Fresnel on the actual curved spherical cap, not a painted circular rim.
+      // Schlick's grazing response is broadened to remain visible on shallow,
+      // frosted convex optics without overwhelming their diffuse veil.
+      if(convex>.5&&u_convexFresnel>.001){
+        float ndv=clamp(abs(dot(n,view)),0.0,1.0);
+        float schlick=.04+.96*pow(1.0-ndv,5.0);
+        float broad=pow(1.0-ndv,1.15);
+        float capFr=mix(schlick,broad,.82);
+        float capVisibility=(.18+.82*(1.0-u_faceMix))*(1.0-.30*frost);
+        float capLight=u_convexFresnel*capFr*capVisibility;
+        col+=mix(u_paletteB,u_paletteA,.82)*capLight*.90;
+        alpha+=capLight*.23;
+      }
       // A micro-bevel gives the flat face an angularly varying normal only
       // at its edge. Its Fresnel highlight travels around the rim on orbit.
       if(u_surface>.5&&u_surface<1.5&&u_fresnelEdge>.001){
@@ -251,6 +267,12 @@
       if (u_surface > 2.5) {
         alpha = (u_surface < 3.5 ? .09 : .04)*u_edgeGlow;
       }
+      // All surface types fade together, including lens-edge guide light.
+      // The front bass lens uses 1.0; the middle and far lens use their
+      // adjustable attenuation uniforms. No geometry or audio is modified.
+      float lensFade=clamp(u_lensFade,0.0,1.0);
+      col*=mix(.72,1.0,lensFade);
+      alpha*=lensFade;
       gl_FragColor = vec4(pow(max(col, vec3(0.0)), vec3(u_gamma)), clamp(alpha, 0.0, .90));
     }`;
   const PARTICLE_VERT = `
@@ -553,7 +575,7 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
       // Orbit can pass behind the lenses. Re-sort transparent objects and
@@ -561,6 +583,7 @@
       const order = axisY[2] >= 0 ? [0, 1, 2] : [2, 1, 0];
       for (const i of order) {
         f(lensProgram,'lensIndex',i);
+        f(lensProgram,'lensFade',i===0?1.0:i===1?P.midFade:P.highFade);
         f(lensProgram, 'radius', radii[i] * P.size); f(lensProgram, 'depth', depths[i]);
         f(lensProgram, 'thickness', P.thickness * radii[i] * P.size);
         f(lensProgram, 'energy', i===0?springs[0].energy:levels[['bass', 'mid', 'high'][i]]);
