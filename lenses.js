@@ -4,7 +4,7 @@
 (function (root) {
   'use strict';
   const DEFAULTS = Object.freeze({
-    size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, outerBandWidth: 1.75, grazingSoftness: .105,
+    size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5,
     reflection: .5, opacity: .48, glow: 1.35, whiteLight: .55, aura: .20, roughness: .13, edgeGlow: 1.25,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
     convexFrost: .78, faceTransition: 18, midMotion: 2.0, highMotion: 2.25,
@@ -42,7 +42,7 @@
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight, u_outerBandWidth, u_grazingSoftness;
+      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -64,61 +64,63 @@
       float curveWidth = mix(1.0,2.4,curved)+curved*u_convexFrost*2.0;
       float roseWidth = (.12*u_bandWidth + .20*u_roughness)*curveWidth;
       float whiteWidth = (.07*u_bandWidth + .12*u_roughness)*curveWidth;
-      float grazingFade=smoothstep(.025,max(.13,u_grazingSoftness),abs(r.y));
-      return grazingFade*endFade * vec2(exp(-.5*pow((abs(hit.z)-4.55-drift)/roseWidth,2.0)),
+      return endFade * vec2(exp(-.5*pow((abs(hit.z)-4.55-drift)/roseWidth,2.0)),
         exp(-.5*pow((abs(hit.z)-3.55)/whiteWidth,2.0)));
     }
     float periodicDistance(float value,float period) {
       return abs(mod(value+period*.5,period)-period*.5);
     }
     vec2 filteredStripes(vec2 distanceToLight,vec2 base,float blur,float period) {
-      // Band-limited periodic Gaussian. ONE continuous representation across
-      // blur=0 avoids the previous discontinuous Gaussian/Fourier switch.
-      // Larger pixel footprints suppress high harmonics before they alias.
-      vec2 variance=base*base+vec2(blur*blur);
-      vec2 sum=vec2(1.0);
-      for(int harmonic=1;harmonic<=5;harmonic++) {
-        float frequency=6.2831853*float(harmonic)/period;
-        vec2 attenuation=exp(-.5*frequency*frequency*variance);
-        sum+=2.0*attenuation*cos(frequency*distanceToLight);
+      if(blur<.001){
+        vec2 q=distanceToLight/max(base,vec2(.025));
+        return exp(-.5*q*q);
       }
-      return clamp(2.5066283*base/period*sum,vec2(0.0),vec2(1.30));
+      // Gaussian convolution of a periodic source. Its two low-frequency
+      // harmonics tend to the correct mean as the angular footprint grows,
+      // avoiding repeated fine stripes and moire at grazing cap normals.
+      vec2 variance=base*base+vec2(blur*blur);
+      vec2 harmonic=exp(-19.7392088*variance/(period*period));
+      vec2 second=harmonic*harmonic*harmonic*harmonic;
+      vec2 phase=6.2831853*distanceToLight/period;
+      return max(vec2(0.0),2.5066283*base/period
+        *(vec2(1.0)+2.0*harmonic*cos(phase)+2.0*second*cos(2.0*phase)));
     }
-    vec2 studioBarsLocal(vec3 p,vec3 r,float curved,float pixelBlur) {
+    vec2 studioBarsLocal(vec3 p,vec3 r,float curved) {
       if(u_lightLayout<.5)return classicBars(p,r,curved);
       float frost=curved*u_convexFrost;
       if(u_lightLayout<1.5){
         // Two broad parallel studio planes carry one common X-aligned array.
         // A flat receiver sees parallel bands at every angle: no cubemap
         // face changes, rotated panel sets, or crossing stripe directions.
-        // A smooth angular gate avoids black/bright flips at r.y=0.
-        // The denominator remains finite even for nearly parallel rays.
-        float yAngle=abs(r.y);
-        float gate=smoothstep(.006,max(.025,u_grazingSoftness),yAngle);
-        if(gate<.00001)return vec2(0.0);
-        float safeY=(r.y<0.0?-1.0:1.0)*max(yAngle,.006);
-        float t=((r.y<0.0?-3.2:3.2)-p.y)/safeY;
+        // Central pearl-white strip with two non-repeating rose-gold strips.
+        // Beyond each outer rose highlight is an INFINITE golden half-plane.
+        // Grazing reflected rays may move across a huge distance, but cannot
+        // repeatedly cross bright and dark bands because the source is finite
+        // in band count, not periodically tiled.
+        float signY=r.y<0.0?-1.0:1.0;
+        float safeY=signY*max(abs(r.y),.0001);
+        float t=(signY*3.2-p.y)/safeY;
         if(t<=0.0)return vec2(0.0);
         vec3 hit=p+r*t;
         float drift=.10*sin(u_time*.12)*u_surfaceMotion;
-        float period=max(1.2,u_bandSpacing)*1.5,offset=period*.20;
+        float period=max(1.2,u_bandSpacing)*1.5;
+        float offset=period*.20;
         float phase=hit.z-u_bandOffset;
-        vec2 distanceToLight=vec2(periodicDistance(phase+offset-drift,period),
-          periodicDistance(phase,period));
-        // Off-axis bands widen progressively, with peak compensation so that
-        // the outer studio panels do not overpower the central highlights.
-        float outer=smoothstep(1.4,8.0,abs(phase));
-        float widen=mix(1.0,max(1.0,u_outerBandWidth),outer);
-        vec2 base=vec2(.075*u_bandWidth+.12*u_roughness,.058*u_bandWidth+.10*u_roughness)*2.0*widen;
-        // This conservative fallback also works when WebGL 1 derivatives
-        // are not available, and the cap retains its existing frost blur.
-        float fallbackBlur=.055*(1.0-smoothstep(.10,.55,yAngle))/max(yAngle,.08);
-        float frostBlur=frost*(.14+.055*t/max(yAngle,.12));
-        float blur=max(max(fallbackBlur,frostBlur),pixelBlur);
-        float edgeFade=1.0-smoothstep(34.0,48.0,max(abs(hit.x),abs(hit.z)));
-        vec2 lights=filteredStripes(distanceToLight,base,blur,period);
-        float otherRose=filteredStripes(vec2(periodicDistance(phase-offset-drift,period),0.0),base,blur,period).x;
-        return vec2(lights.x+otherRose,lights.y)*edgeFade*gate*inversesqrt(widen);
+        // Retain the original widths at the center; diffuse convex light
+        // receives only a bounded width increase.
+        float blur=min(1.2,frost*(.14+.055*t/max(abs(r.y),.12)));
+        float roseWidth=max(.04,(.075*u_bandWidth+.12*u_roughness)*2.0+blur*.24);
+        float whiteWidth=max(.04,(.058*u_bandWidth+.10*u_roughness)*2.0+blur*.32);
+        float radial=abs(phase-drift);
+        // Left and right bands approach a constant .74 gold past their
+        // outer shoulders. Neither outward direction goes dark again.
+        float enterRose=smoothstep(max(0.0,offset-1.4*roseWidth),
+          offset+.10*roseWidth,radial);
+        float settleRose=smoothstep(offset+.15*roseWidth,
+          offset+2.4*roseWidth,radial);
+        float warm=enterRose*(1.0-.26*settleRose);
+        float cool=exp(-.5*pow(phase/whiteWidth,2.0));
+        return vec2(warm,cool);
       }
       // Ring emitters retain the enclosing studio, with diffuse lobe
       // broadening only on the convex face.
@@ -133,7 +135,7 @@
       vec2 distanceToLight=vec2(periodicDistance(radial-.35-drift,1.4),
         periodicDistance(radial-1.05,1.4));
       vec2 base=vec2(.060*u_bandWidth+.10*u_roughness,.047*u_bandWidth+.08*u_roughness);
-      float blur=max(frost*(.14+.045*t/max(max(abs(r.x),abs(r.y)),abs(r.z))),pixelBlur*.35);
+      float blur=frost*(.14+.045*t/max(max(abs(r.x),abs(r.y)),abs(r.z)));
       return filteredStripes(distanceToLight,base,blur,1.4);
     }
     // Exact one-bounce intersections with the same scaled spherical cap,
@@ -185,7 +187,7 @@
       if(abs(u_lensIndex-2.0)>.1)traceLens(p,d,u_lensData2,hit,part,picked);
       if(hit.x>999.0)return vec4(0.0);
       vec3 point=p+d*hit.x,n=hit.yzw;
-      vec2 bars=studioBarsLocal(point,reflect(d,n),1.0-step(.5,part),0.0);
+      vec2 bars=studioBarsLocal(point,reflect(d,n),1.0-step(.5,part));
       float fr=.04+.96*pow(1.0-abs(dot(n,-d)),5.0);
       float rim=smoothstep(.89,.995,length(point.xz)/picked.x);
       vec3 color=u_paletteC*.07+(u_paletteB*bars.x*.85
@@ -204,23 +206,13 @@
       if (dot(n,view) < 0.0) n = -n;
       float fresnel = pow(1.0 - abs(n.z), 3.0);
       vec3 p=sceneVector(v_position),ray=sceneVector(reflect(-view,n));
-      // Evaluate the projected studio coordinate for every primary fragment
-      // BEFORE any per-pixel branching. OES derivatives are optional in
-      // WebGL 1: a conservative angular blur is used when unavailable.
-      float pixelBlur=0.0;
-      #if HAS_SCREEN_DERIVATIVES
-        float safeY=(ray.y<0.0?-1.0:1.0)*max(abs(ray.y),.006);
-        float panelY=(ray.y<0.0?-3.2:3.2);
-        float projectedZ=p.z+ray.z*((panelY-p.y)/safeY);
-        pixelBlur=clamp(.65*fwidth(projectedZ),0.0,4.0);
-      #endif
       float convex=1.0-step(.5,u_surface),frost=convex*u_convexFrost;
       // Blend over an angular interval around edge-on, never a sign test.
       // The far cap retains its diffuse veil below; only its coherent studio
       // lobe fades out, so hidden-surface filtering is not paid every frame.
       float surfaceWeight=convex>.5 ? 1.0-u_faceMix : u_faceMix;
       vec2 bars=u_surface<1.5&&surfaceWeight>.001
-        ? studioBarsLocal(p,ray,convex,pixelBlur)*surfaceWeight : vec2(0.0);
+        ? studioBarsLocal(p,ray,convex)*surfaceWeight : vec2(0.0);
       float warm = bars.x, cool = bars.y;
       vec3 tint = u_paletteB;
       if (u_paletteMode < .5) tint = .55 + .45 * cos(vec3(0.0, 2.1, 4.2) + n.y * 3.0 + n.x * 2.0);
@@ -371,12 +363,7 @@
     let lensProgram, particleProgram;
     try {
       const highp=gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT);
-      const derivatives=gl.getExtension('OES_standard_derivatives');
-      const preamble=derivatives
-        ? '#extension GL_OES_standard_derivatives : enable\n#define HAS_SCREEN_DERIVATIVES 1\n'
-        : '#define HAS_SCREEN_DERIVATIVES 0\n';
-      const body=highp&&highp.precision?FRAG:FRAG.replace('precision highp float','precision mediump float');
-      lensProgram=program(VERT,preamble+body);
+      lensProgram=program(VERT,highp&&highp.precision?FRAG:FRAG.replace('precision highp float','precision mediump float'));
       particleProgram=program(PARTICLE_VERT,PARTICLE_FRAG);
     }
     catch (error) {
@@ -599,7 +586,7 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost', 'outerBandWidth', 'grazingSoftness']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
       // Orbit can pass behind the lenses. Re-sort transparent objects and
