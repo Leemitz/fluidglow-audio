@@ -4,7 +4,7 @@
 (function (root) {
   'use strict';
   const DEFAULTS = Object.freeze({
-    size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5,
+    size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
     reflection: .5, opacity: .48, glow: 1.35, whiteLight: .55, aura: .20, roughness: .13, edgeGlow: 1.25,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
     convexFrost: .78, faceTransition: 18, midMotion: 2.0, highMotion: 2.25,
@@ -42,7 +42,7 @@
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight;
+      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight, u_finiteBands, u_outerDecay;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -92,35 +92,45 @@
         // Two broad parallel studio planes carry one common X-aligned array.
         // A flat receiver sees parallel bands at every angle: no cubemap
         // face changes, rotated panel sets, or crossing stripe directions.
-        // Central pearl-white strip with two non-repeating rose-gold strips.
-        // Beyond each outer rose highlight is an INFINITE golden half-plane.
-        // Grazing reflected rays may move across a huge distance, but cannot
-        // repeatedly cross bright and dark bands because the source is finite
-        // in band count, not periodically tiled.
+        // v2.7.4 studio stripe kernel, but with exactly five central
+        // period cells (at -2,-1,0,+1,+2 periods by default).
+        // The final rose-gold peak at each end is held and then faded,
+        // so a grazing ray cannot cross more periodically repeated bands.
         float signY=r.y<0.0?-1.0:1.0;
         float safeY=signY*max(abs(r.y),.0001);
         float t=(signY*3.2-p.y)/safeY;
         if(t<=0.0)return vec2(0.0);
         vec3 hit=p+r*t;
         float drift=.10*sin(u_time*.12)*u_surfaceMotion;
-        float period=max(1.2,u_bandSpacing)*1.5;
-        float offset=period*.20;
+        float period=max(1.2,u_bandSpacing)*1.5,offset=period*.20;
         float phase=hit.z-u_bandOffset;
-        // Retain the original widths at the center; diffuse convex light
-        // receives only a bounded width increase.
-        float blur=min(1.2,frost*(.14+.055*t/max(abs(r.y),.12)));
-        float roseWidth=max(.04,(.075*u_bandWidth+.12*u_roughness)*2.0+blur*.24);
-        float whiteWidth=max(.04,(.058*u_bandWidth+.10*u_roughness)*2.0+blur*.32);
-        float radial=abs(phase-drift);
-        // Left and right bands approach a constant .74 gold past their
-        // outer shoulders. Neither outward direction goes dark again.
-        float enterRose=smoothstep(max(0.0,offset-1.4*roseWidth),
-          offset+.10*roseWidth,radial);
-        float settleRose=smoothstep(offset+.15*roseWidth,
-          offset+2.4*roseWidth,radial);
-        float warm=enterRose*(1.0-.26*settleRose);
-        float cool=exp(-.5*pow(phase/whiteWidth,2.0));
-        return vec2(warm,cool);
+        float groups=floor((max(1.0,u_finiteBands)+1.0)*.5);
+        // (groups-1) full periods on each side of the central cell,
+        // followed by the outward-facing rose highlight at +/-offset.
+        float edgePhase=(groups-1.0)*period+offset;
+        float rosePhase=phase-drift;
+        float sampledRose=clamp(rosePhase,-edgePhase,edgePhase);
+        // The white stripe is fixed in studio space; the rose stripes
+        // retain their tiny independent drift from v2.7.4.
+        float sampledWhite=sampledRose+drift;
+        vec2 distanceToLight=vec2(
+          periodicDistance(sampledRose+offset,period),
+          periodicDistance(sampledWhite,period));
+        vec2 base=vec2(.075*u_bandWidth+.12*u_roughness,
+          .058*u_bandWidth+.10*u_roughness)*2.0;
+        float blur=frost*(.14+.055*t/max(abs(r.y),.12));
+        vec2 lights=filteredStripes(distanceToLight,base,blur,period);
+        float otherRose=filteredStripes(
+          vec2(periodicDistance(sampledRose-offset,period),0.0),
+          base,blur,period).x;
+        vec2 lastBands=vec2(lights.x+otherRose,lights.y);
+        // The outermost GOLD peak turns into a non-periodic, smoothly
+        // diminishing ribbon. No more bands or sharp far-panel cutoff.
+        float outward=max(0.0,abs(rosePhase)-edgePhase);
+        float decayScale=period*max(.2,u_outerDecay);
+        float goldFade=exp(-pow(outward/decayScale,1.35));
+        float whiteFade=exp(-pow(outward/(decayScale*.58),1.35));
+        return lastBands*vec2(goldFade,whiteFade);
       }
       // Ring emitters retain the enclosing studio, with diffuse lobe
       // broadening only on the convex face.
@@ -586,7 +596,7 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost', 'finiteBands', 'outerDecay']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
       // Orbit can pass behind the lenses. Re-sort transparent objects and
