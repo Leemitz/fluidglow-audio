@@ -29,12 +29,23 @@ function localWav() {
     ...(process.env.PLAYWRIGHT_BROWSER_EXECUTABLE ? {executablePath:process.env.PLAYWRIGHT_BROWSER_EXECUTABLE} : {}),
     args:['--use-angle=swiftshader','--enable-unsafe-swiftshader','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream']});
   const page = await browser.newPage({viewport:{width:1440,height:1000},permissions:['microphone']});
+  // Observe the browser's actual Web Audio node without modifying the app.
+  await page.addInitScript(() => {
+    const Context=window.AudioContext||window.webkitAudioContext;
+    const createDelay=Context.prototype.createDelay;
+    Context.prototype.createDelay=function(maximum) {
+      const node=createDelay.call(this,maximum);
+      window.__testMusicDelay=node;
+      window.__testMusicDelayMax=maximum;
+      return node;
+    };
+  });
   page.on('pageerror',error=>errors.push(error.message));
   page.on('console',message=>{if(message.type()==='error')errors.push(message.text())});
   await page.goto(`http://127.0.0.1:${server.address().port}/preview/fluidglow-audio/`);
   assert.equal(await page.locator('.playlist-track').count(),5);
   assert.equal(await page.locator('[data-palette="bronze"]').getAttribute('aria-pressed'),'true');
-  for (const [id,value] of [['motion','70'],['beatSensitivity','1.45'],['kickInterval','300']])
+  for (const [id,value] of [['motion','70'],['beatSensitivity','1.45'],['kickInterval','300'],['audioDelay','0']])
     assert.equal(await page.locator('#'+id).inputValue(),value);
   await page.waitForTimeout(450);
   assert(await page.evaluate(()=>document.getElementById('player').paused));
@@ -58,6 +69,19 @@ function localWav() {
     await page.waitForFunction(()=>Number(document.getElementById('loudness-value').textContent)>5);
     assert((await page.evaluate(()=>document.getElementById('player').currentSrc)).endsWith('/audio/'+file));
     const duration=await page.evaluate(()=>document.getElementById('player').duration);
+    if(index===0){
+      await page.waitForFunction(()=>!!window.__testMusicDelay);
+      assert((await page.evaluate(()=>window.__testMusicDelayMax))>=.3);
+      assert(Math.abs(await page.evaluate(()=>window.__testMusicDelay.delayTime.value))<.002);
+      for(const ms of [150,300,0]){
+        await page.locator('#audioDelay').evaluate((el,ms)=>{
+          el.value=String(ms);el.dispatchEvent(new Event('input',{bubbles:true}));
+        },ms);
+        await page.waitForFunction(ms=>Math.abs(window.__testMusicDelay.delayTime.value-ms/1000)<.007,ms);
+        assert.equal(await page.locator('#audioDelay-out').textContent(),ms+' ms');
+      }
+      results.push('Actual music DelayNode: adjustable 0 / 150 / 300 ms during playback');
+    }
     results.push({title,bytes:size,duration,decoded:true,fftResponds:true});
     console.log(`Decoded ${index+1}/5: ${title} (${duration.toFixed(2)}s)`);
   }
@@ -101,19 +125,24 @@ function localWav() {
   results.push('Local file and fake microphone modes stop playlist; selected track preserved on return');
 
   await page.locator('[data-palette="rose"]').click();
+  await page.locator('#audioDelay').evaluate(el=>{
+    el.value='300';el.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await page.waitForFunction(()=>Math.abs(window.__testMusicDelay.delayTime.value-.300)<.007);
   for(const id of ['motion','beatSensitivity','kickInterval'])
     await page.locator('#'+id).evaluate(el=>{el.value=el.min;el.dispatchEvent(new Event('input'))});
   await page.locator('#reset-btn').click();
   assert.equal(await page.locator('[data-palette="bronze"]').getAttribute('aria-pressed'),'true');
-  for(const [id,value] of [['motion','70'],['beatSensitivity','1.45'],['kickInterval','300']])
+  for(const [id,value] of [['motion','70'],['beatSensitivity','1.45'],['kickInterval','300'],['audioDelay','0']])
     assert.equal(await page.locator('#'+id).inputValue(),value);
+  await page.waitForFunction(()=>Math.abs(window.__testMusicDelay.delayTime.value)<.007);
   await page.evaluate(()=>scrollTo(0,0));
   await page.screenshot({path:path.join(output,'playlist-desktop.png')});
   await page.setViewportSize({width:390,height:844});
   await page.evaluate(()=>scrollTo(0,0));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth),390);
   await page.screenshot({path:path.join(output,'playlist-mobile.png'),fullPage:true});
-  results.push('Reset restores Twilight Rosé, 1.45 sensitivity, 300ms interval, 70% motion; mobile fits');
+  results.push('Reset restores default 0 ms audio delay, Twilight Rosé, 1.45 sensitivity, 300ms interval, 70% motion; mobile fits');
   assert.deepEqual(errors,[]);
   fs.writeFileSync(path.join(output,'playlist-validation.json'),JSON.stringify({passed:true,results,errors},null,2));
   console.log(JSON.stringify({passed:true,results,errors},null,2));
