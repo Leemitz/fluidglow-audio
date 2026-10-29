@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#090b11">
   <meta name="description" content="FluidGlow Audio — 三片同轴半透平凸透镜，由低中高频驱动，低频激发环形频谱粒子涟漪。">
   <title>FluidGlow Audio — Spectral Lenses</title>
-  <link rel="stylesheet" href="styles.css?v=2.8.0">
+  <link rel="stylesheet" href="styles.css?v=2.8.1">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -84,6 +84,8 @@
         <label class="slider-row"><span>透镜运动幅度 <output id="motion-out">70%</output></span><input id="motion" type="range" min="0" max="100" step="5" value="70"></label>
         <label class="slider-row"><span>鼓点识别灵敏度 <output id="beatSensitivity-out">1.45×</output></span><input id="beatSensitivity" type="range" min="0.6" max="1.8" step="0.05" value="1.45"></label>
         <label class="slider-row"><span>鼓点最短间隔 <output id="kickInterval-out">300 ms</output></span><input id="kickInterval" type="range" min="225" max="900" step="25" value="300"></label>
+        <label class="slider-row"><span>音乐滞后于画面 <output id="audioDelay-out">0 ms</output></span><input id="audioDelay" type="range" min="0" max="300" step="5" value="0" aria-label="音乐相对视觉延迟"></label>
+        <p class="dynamics-note">音乐延迟仅作用于歌单与上传音乐的扬声器输出；频谱与透镜仍以原始音频实时分析。麦克风不回放。</p>
         <p class="dynamics-note">低频透镜只响应确认后的鼓点冲击。积分算法默认启用，可在上方切回旧版对照；想更安静可降低识别灵敏度或增大最短间隔。</p>
         <div class="effect-switches">
           <label class="switch-row" for="wave-enabled"><span><strong>鼓点粒子涟漪</strong><small>确认低频鼓点峰值后发出一圈波前</small></span><input id="wave-enabled" type="checkbox" checked role="switch" aria-label="开启鼓点粒子涟漪"></label>
@@ -117,15 +119,15 @@
       <div class="view-legend"><span class="legend-cross">＋</span><span>OPTICAL STUDY <i>001</i></span></div>
       <div class="view-controls"><span id="view-drag-hint">拖动旋转 · 双击复位</span><button id="reset-view-btn" type="button" title="恢复默认观察方向（键盘 Home）">↺ 恢复视角</button></div>
       <div class="axis-note">Y+ <span>大透镜 → 小透镜</span></div>
-      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.8.0</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
+      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.8.1</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
       <div class="view-bottom"><span>THREE LENSES / ONE AXIS / SPECTRAL RIPPLES</span><span class="movement-indicator"><i></i> COAXIAL MOTION</span></div>
       <div class="drop-hint" id="drop-hint"><span>♫</span> 松开以载入音乐文件</div>
     </div>
   </main>
   <div id="toast" role="status" aria-live="polite"></div>
   <audio id="player" preload="metadata"></audio>
-  <script src="audio-dynamics.js?v=2.8.0"></script>
-  <script src="lenses.js?v=2.8.0"></script>
-  <script src="app.js?v=2.8.0"></script>
+  <script src="audio-dynamics.js?v=2.8.1"></script>
+  <script src="lenses.js?v=2.8.1"></script>
+  <script src="app.js?v=2.8.1"></script>
 </body>
 </html>
