@@ -111,7 +111,7 @@
   let frequencyDb = null;
   let dynamics = null;
   const emptySpectrum = () => ({loudness:0,bass:0,mid:0,high:0,flux:0,bassFlux:0,
-    bassThreshold:0,attacks:{bass:0,mid:0,high:0}});
+    bassThreshold:0,attacks:{bass:0,mid:0,high:0},detectors:null});
   let latestSpectrum=emptySpectrum();
   let waveform = null;
   const ringSpectrum = new Float32Array(96);
@@ -123,7 +123,7 @@
   const setting = { sensitivity: INPUT_DEFAULTS.sensitivity, intensity: INPUT_DEFAULTS.intensity/100,
     motion: INPUT_DEFAULTS.motion/100, beatSensitivity: INPUT_DEFAULTS.beatSensitivity,
     kickInterval: INPUT_DEFAULTS.kickInterval/1000, wave: INPUT_DEFAULTS.wave/100,
-    waveEnabled: true, surfaceEnabled: false };
+    waveEnabled: true, surfaceEnabled: false, bassDetector: 'integral' };
   let surfaceLevel = 0;
   const meters = {
     loudness: [$('loudness-fill'), $('loudness-value')],
@@ -293,7 +293,7 @@
     analyser.getFloatFrequencyData(frequencyDb);
     analyser.getFloatTimeDomainData(waveform);
     const raw = dynamics.process(frequencyDb, waveform, dt, setting.sensitivity,
-      setting.beatSensitivity, setting.kickInterval);
+      setting.beatSensitivity, setting.kickInterval, setting.bassDetector);
     dynamics.spectrumSnapshot(ringSpectrum, setting.sensitivity);
     return raw;
   }
@@ -306,7 +306,60 @@
 
   // Onsets come from unclipped physical spectral energy, never from a meter
   // percentage or its rounded delta. Each band can also excite its lens.
-  const beat = { count: 0, flash: 0, novelty: 0, threshold: 0 };
+  const beat = { count: 0, flash: 0, novelty: 0, threshold: 0,
+    integralCount: 0, legacyCount: 0, trace: [], lastIntegralAt: -Infinity };
+  const diagnosticCanvas=$('onset-chart');
+  const diagnosticContext=diagnosticCanvas.getContext('2d');
+  function recordDetectors(raw) {
+    if(!raw.detectors)return;
+    const {legacy,integral}=raw.detectors;
+    if(legacy.hit)beat.legacyCount++;
+    if(integral.hit){beat.integralCount++;beat.lastIntegralAt=performance.now();}
+    beat.trace.push({power:integral.power,velocity:integral.velocity,
+      integral:integral.integral,score:integral.score,threshold:integral.threshold,
+      hit:integral.hit});
+    if(beat.trace.length>280)beat.trace.shift();
+  }
+  // Three separate scales keep low-band power, dE/dt and the onset integral
+  // visible simultaneously. The red line shares the S-row scale.
+  function drawOnsetChart() {
+    if(!$('onset-inspector').open||!diagnosticContext)return;
+    const g=diagnosticContext,w=diagnosticCanvas.width,h=diagnosticCanvas.height;
+    g.clearRect(0,0,w,h);g.fillStyle='#100e12';g.fillRect(0,0,w,h);
+    const rows=[
+      {label:'E · LOW POWER',key:'power',color:'#d4a784'},
+      {label:'v · POSITIVE ΔE/Δt',key:'velocity',color:'#d0c3eb'},
+      {label:'S · 80 ms / THRESHOLD',key:'score',color:'#8edac5',other:'threshold'}
+    ];
+    const trace=beat.trace;
+    rows.forEach((row,index)=>{
+      const top=index*66+8,bottom=top+48;
+      g.fillStyle='#a69ba6';g.font='11px sans-serif';g.fillText(row.label,10,top+10);
+      g.strokeStyle='rgba(255,255,255,.10)';g.beginPath();
+      g.moveTo(10,bottom);g.lineTo(w-10,bottom);g.stroke();
+      const max=Math.max(.000001,...trace.map(item=>item[row.key]),
+        ...(row.other?trace.map(item=>item[row.other]):[]))*1.12;
+      const plot=(key,color,dashed=false)=>{
+        if(!trace.length)return;
+        g.beginPath();g.strokeStyle=color;g.lineWidth=1.8;g.setLineDash(dashed?[5,4]:[]);
+        trace.forEach((item,i)=>{
+          const x=10+(w-20)*i/Math.max(1,trace.length-1);
+          const y=bottom-40*Math.min(1,item[key]/max);
+          if(i===0)g.moveTo(x,y);else g.lineTo(x,y);
+        });
+        g.stroke();g.setLineDash([]);
+      };
+      plot(row.key,row.color);
+      if(row.other) {
+        plot(row.other,'#ee9e99',true);
+        trace.forEach((item,i)=>{
+          if(!item.hit)return;
+          const x=10+(w-20)*i/Math.max(1,trace.length-1);
+          g.strokeStyle='#f8e3c8';g.beginPath();g.moveTo(x,top+13);g.lineTo(x,bottom);g.stroke();
+        });
+      }
+    });
+  }
   const motionPreference = window.matchMedia('(prefers-reduced-motion:reduce)');
   let reduceMotion = motionPreference.matches;
   motionPreference.addEventListener('change', () => {
@@ -318,6 +371,8 @@
     dynamics?.reset(); ringSpectrum.fill(0); glow.clearRipples(); glow.clearMotion();
     latestSpectrum=emptySpectrum();
     beat.novelty = 0; beat.threshold = 0;
+    beat.trace.length=0;beat.integralCount=0;beat.legacyCount=0;
+    beat.lastIntegralAt=-Infinity;
   }
 
   function strike(strength = 1) {
@@ -347,6 +402,7 @@
     lastAudioSample=now;
     if(mode!=='mic'&&player.paused){latestSpectrum=emptySpectrum();return;}
     latestSpectrum=spectrum(dt);
+    recordDetectors(latestSpectrum);
     if(!reduceMotion)detectBeat(latestSpectrum);
   },24);
   function animate(now) {
@@ -374,7 +430,17 @@
       lastUi = now;
       $('beat-lamp').style.setProperty('--beat-flash', beat.flash.toFixed(3));
       $('beat-count').textContent = String(beat.count).padStart(3, '0');
-      $('onset-debug').textContent = mode !== 'mic' && player.paused ? '等待播放 · 真实音频分析' : `BASS ONSET ${beat.novelty.toFixed(3)} / ${beat.threshold.toFixed(3)}`;
+      $('onset-debug').textContent = mode !== 'mic' && player.paused
+        ? '等待播放 · 真实音频分析'
+        : `${setting.bassDetector==='integral'?'积分':'旧版'} ${beat.novelty.toFixed(2)} / ${beat.threshold.toFixed(2)}`;
+      $('detector-counts').textContent=`积分 ${beat.integralCount} · 旧版 ${beat.legacyCount}`;
+      const diag=latestSpectrum.detectors?.integral;
+      $('onset-power').textContent=diag?diag.power.toExponential(2):'—';
+      $('onset-velocity').textContent=diag?diag.velocity.toFixed(2):'—';
+      $('onset-integral').textContent=diag?diag.integral.toFixed(2):'—';
+      $('onset-threshold').textContent=diag?diag.threshold.toFixed(2):'—';
+      $('onset-trigger').textContent=performance.now()-beat.lastIntegralAt<220?'TRIGGER':'—';
+      drawOnsetChart();
       const metrics = glow.metrics;
       if (metrics) {
         $('lens-gap').textContent = (metrics.depths[2] - metrics.depths[0]).toFixed(2);
@@ -448,6 +514,11 @@
   $('surface-enabled').addEventListener('change', event => {
     setting.surfaceEnabled = event.target.checked;
     toast(setting.surfaceEnabled ? '已开启自主反射光移动' : '已关闭自主反射光移动');
+  });
+  $('bass-detector').addEventListener('change',event=>{
+    setting.bassDetector=event.target.value==='legacy'?'legacy':'integral';
+    beat.novelty=0;beat.threshold=0;
+    toast(setting.bassDetector==='integral'?'已启用低频正向变化积分检测':'已切换回旧版鼓点检测');
   });
   for (const id of ['sensitivity', 'intensity', 'wave', 'motion', 'beatSensitivity', 'kickInterval']) {
     $(id).addEventListener('input', event => {
@@ -560,6 +631,7 @@
       $(name).value = String(value);
       $(name).dispatchEvent(new Event('input'));
     }
+    $('bass-detector').value='integral';$('bass-detector').dispatchEvent(new Event('change'));
     $('wave-enabled').checked = true; $('wave-enabled').dispatchEvent(new Event('change'));
     $('surface-enabled').checked = false; $('surface-enabled').dispatchEvent(new Event('change'));
     Object.assign(PARAMS, PARAM_DEFAULTS);
