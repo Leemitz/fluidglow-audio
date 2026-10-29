@@ -56,7 +56,7 @@ assert(rate.hits.integral.length>=9,'Integrator must also work at 120 fps');
 const dense=exercise('rapid',.024,.70);
 dense.hits.integral.slice(1).forEach((t,i)=>assert(t-dense.hits.integral[i]>=.69,
   'Manual kickInterval must bound consecutive integral hits'));
-assert(dense.hits.integral.length>=0);
+assert(dense.hits.integral.length>=3,'Cooldown fixture must generate enough events to test spacing');
 const oldModel=new AudioDynamics(48000,2048),db=new Float32Array(1024),wave=new Float32Array(2048);
 db.fill(-Infinity);db[4]=-24;wave.fill(.22);
 const defaultResult=oldModel.process(db,wave,.024);
