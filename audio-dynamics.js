@@ -161,7 +161,7 @@
           const coherence=kickPositive/Math.max(kickPositive+kickNegative,1e-8);
           const slope=8.686*(kickAmplitude-state.previousAmplitude)/(Math.max(state.previousAmplitude,.006)*dt);
           state.recentSlope=Math.max(0,slope,state.recentSlope*Math.exp(-dt/.06));
-          const ready=this.time-state.lastAt>=Math.max(.30,kickInterval);
+          const ready=this.time-state.lastAt>=Math.max(.22,kickInterval);
           const midRise=(bandAmplitudes.mid-this.bands.mid.slow)/Math.max(this.bands.mid.slow,.006);
           const highRise=(bandAmplitudes.high-this.bands.high.slow)/Math.max(this.bands.high.slow,.006);
           const midSlope=8.686*(bandAmplitudes.mid-this.bands.mid.previousAmplitude)
