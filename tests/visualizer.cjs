@@ -41,6 +41,7 @@ function denseWav(drums=true) {
   data.name=drums?'dense-compressed-mix.wav':'bass-bed-without-drums.wav'; return data;
 }
 async function checkDrumFixtures(page,results) {
+  await page.locator('#bass-detector').selectOption('legacy'); // Preserve old-fixture baseline.
   for (const [id,value] of [['beatSensitivity',.9],['kickInterval',400]])
     await page.locator('#'+id).evaluate((el,value)=>{el.value=value;el.dispatchEvent(new Event('input'))},value);
   await page.locator('#sensitivity').evaluate(el=>{el.value=3;el.dispatchEvent(new Event('input'))});
@@ -151,6 +152,11 @@ let browser, server;
   assert.equal(await page.locator('#motion').inputValue(),'70');
   assert.equal(await page.locator('#beatSensitivity').inputValue(),'1.45');
   assert.equal(await page.locator('#kickInterval').inputValue(),'300');
+  assert.equal(await page.locator('#bass-detector').inputValue(),'integral');
+  assert.equal(await page.locator('#onset-chart').count(),1);
+  await page.locator('#bass-detector').selectOption('legacy');
+  assert.equal(await page.locator('#bass-detector').inputValue(),'legacy');
+  await page.locator('#bass-detector').selectOption('integral');
   assert(metrics.depths[0] < metrics.depths[1] && metrics.depths[1] < metrics.depths[2]);
   assert.equal(metrics.activeRipples,0,'An idle playlist must not invent audio beats');
   await page.locator('#test-wave-btn').click();
