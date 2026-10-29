@@ -3,11 +3,80 @@
   'use strict';
   const BANDS = { bass: [35, 180], mid: [180, 1900], high: [1900, 10000] };
   const follow = (a, b, dt, tau) => a + (b - a) * (1 - Math.exp(-dt / tau));
+
+  // Shadow detector: the integral is the signed positive CHANGE of bass power,
+  // not the time integral of loudness (whose derivative is just loudness).
+  // Work in 45-120 Hz linear FFT POWER; normalize against a slow power floor.
+  class BassIntegralDetector {
+    constructor() { this.reset(); }
+    reset() {
+      this.time=0; this.previousPower=null; this.slowPower=0;
+      this.window=[]; this.noiseMean=.12; this.noiseVariance=.12;
+      this.armed=true; this.candidate=null; this.lastAt=-Infinity; this.count=0;
+    }
+    sample(power, dt, rms, sensitivity=1.45, minInterval=.30) {
+      this.time+=dt;
+      const now=this.time;
+      const thresholdNow=()=>Math.max(.70,
+        (1.15+this.noiseMean+1.3*Math.sqrt(this.noiseVariance))/Math.max(.4,sensitivity));
+      if(this.previousPower===null) {
+        // Prime from the first frame: an already-sustained bass tone should
+        // not be mistaken for a new transient at playback startup.
+        this.previousPower=power; this.slowPower=power;
+        return {hit:false,strength:0,power,velocity:0,integral:0,score:0,
+          threshold:thresholdNow(),compactness:0};
+      }
+      const reference=Math.max(this.slowPower,power*.17,1e-7);
+      const delta=Math.min(4,Math.max(0,power-this.previousPower)/reference);
+      this.previousPower=power;
+      this.slowPower+= (power-this.slowPower)*(1-Math.exp(-dt/.36));
+      this.window.push({at:now,rise:delta});
+      while(this.window.length&&this.window[0].at<now-.08)this.window.shift();
+      let integral=0,strongest=0;
+      for(const item of this.window) {
+        integral+=item.rise;
+        strongest=Math.max(strongest,item.rise);
+      }
+      // A fast, concentrated attack is more percussive than slowly rising or
+      // oscillating bass. This is a SOFT weight, not an additional hard gate.
+      const compactness=integral>1e-8?strongest/integral:0;
+      const score=integral*(.20+.80*Math.min(1,compactness/.65));
+      const threshold=thresholdNow();
+      const innovation=score-this.noiseMean;
+      const learn=1-Math.exp(-dt/1.6);
+      this.noiseMean+=learn*(Math.min(score,threshold*1.2)-this.noiseMean);
+      this.noiseVariance+=learn*(Math.min(innovation*innovation,4)-this.noiseVariance);
+      if(score<threshold*.48&&!this.candidate)this.armed=true;
+      const ready=now-this.lastAt>=Math.max(.22,minInterval);
+      const audible=rms>.0015&&power>1e-7;
+      if(ready&&audible&&this.armed&&!this.candidate&&score>threshold) {
+        this.candidate={at:now,peak:score,threshold};
+        this.armed=false;
+      }
+      let hit=false,strength=0;
+      if(this.candidate) {
+        const candidate=this.candidate;
+        candidate.peak=Math.max(candidate.peak,score);
+        const age=now-candidate.at;
+        if(age>=.045&&(score<candidate.peak*.78||age>=.090)) {
+          hit=ready&&audible&&candidate.peak>candidate.threshold;
+          if(hit) {
+            this.lastAt=now;this.count++;
+            strength=Math.min(1.1,.35+.25*Math.log1p(candidate.peak/Math.max(candidate.threshold,.01)));
+          }
+          this.candidate=null;
+        }
+      }
+      return {hit,strength,power,velocity:delta/Math.max(dt,.001),
+        integral,score,threshold,compactness};
+    }
+  }
   class AudioDynamics {
     constructor(sampleRate, fftSize) {
       this.hzPerBin = sampleRate / fftSize;
       this.amplitudes = new Float32Array(fftSize / 2);
       this.previous = new Float32Array(fftSize / 2);
+      this.integral = new BassIntegralDetector();
       this.bands = Object.fromEntries(Object.entries(BANDS).map(([key, range]) => [key, {
         first: Math.max(1, Math.ceil(range[0] / this.hzPerBin)),
         end: Math.min(fftSize / 2, Math.ceil(range[1] / this.hzPerBin)),
@@ -17,6 +86,7 @@
     }
     reset() {
       this.previous.fill(0); this.amplitudes.fill(0); this.time = 0; this.primed = false;
+      this.integral.reset();
       for (const state of Object.values(this.bands)) {
         Object.assign(state, { reference: .04, slow: 0, baseline: .02, armed: true,
           lastAt: -Infinity, previousAmplitude: 0, kickSlow: 0, recentSlope: 0, candidate: null });
@@ -41,7 +111,7 @@
         target[i] = this.levelFor(Math.sqrt(power), low < 180 ? 'bass' : low < 1900 ? 'mid' : 'high', sensitivity);
       }
     }
-    process(decibels, waveform, dt, sensitivity = 1, beatSensitivity = .9, kickInterval = .40) {
+    process(decibels, waveform, dt, sensitivity = 1, beatSensitivity = .9, kickInterval = .40, detector = 'legacy') {
       dt = Math.max(.001, Math.min(.1, dt)); this.time += dt;
       let sum = 0;
       for (let i = 0; i < waveform.length; i++) sum += waveform[i] ** 2;
@@ -55,7 +125,7 @@
         for(let i=state.first;i<state.end;i++)energy+=this.amplitudes[i]**2;
         bandAmplitudes[key]=Math.sqrt(energy);
       }
-      const result = { loudness: rms / (rms + .16), attacks: {}, bassFlux: 0, flux: 0 };
+      const result = { loudness: rms / (rms + .16), attacks: {}, bassFlux: 0, flux: 0, detectors: null };
       for (const [key, state] of Object.entries(this.bands)) {
         let positive = 0, previousSum = 0, currentSum = 0;
         let kickPower=0,kickPositive=0,kickNegative=0,kickSum=0,kickPrev=0;
@@ -126,12 +196,25 @@
               hitNovelty=candidate.score;state.candidate=null;
             }
           }
+          // Run the integral detector on EVERY FFT hop, even when the legacy
+          // candidate gates reject this event. Both see identical source data.
+          const integrated=this.integral.sample(kickPower,dt,rms,beatSensitivity,kickInterval);
+          result.detectors={
+            legacy:{hit,score:novelty,threshold,
+              strength:hit?Math.min(1.1,.35+.25*Math.log1p(hitNovelty/threshold)):0},
+            integral:integrated
+          };
           state.kickSlow=follow(state.kickSlow,kickAmplitude,dt,.24);
           state.previousAmplitude=kickAmplitude;
         } else {
           hit=this.primed&&audible&&state.armed&&novelty>threshold&&this.time-state.lastAt>.24;
         }
         result.attacks[key] = hit ? Math.min(1.1,.35+.25*Math.log1p(hitNovelty/threshold)) : 0;
+        if(key==='bass'&&detector==='integral') {
+          // The integrator drives both the bass lens impulse and ripple.
+          // Old candidate state continues advancing for A/B comparison.
+          result.attacks.bass=result.detectors.integral.strength;
+        }
         if (hit) { state.armed = false; state.lastAt = this.time; }
         if(key!=='bass')state.previousAmplitude=amplitude;
         // Slow independent references adapt to each band's actual amplitude.
@@ -143,7 +226,10 @@
         this.diagnostics[key] = { amplitude, db: 20 * Math.log10(Math.max(amplitude, 1e-8)),
           reference: state.reference, novelty, threshold, level: result[key], ...kickMetrics };
         result.flux += novelty / 3;
-        if (key === 'bass') { result.bassFlux = novelty; result.bassThreshold = threshold; }
+        if (key === 'bass') {
+          result.bassFlux=detector==='integral' ? result.detectors.integral.score : novelty;
+          result.bassThreshold=detector==='integral' ? result.detectors.integral.threshold : threshold;
+        }
       }
       this.previous.set(this.amplitudes); this.primed = true;
       return result;
