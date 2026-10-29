@@ -152,6 +152,7 @@ let browser, server;
   assert.equal(await page.locator('#motion').inputValue(),'70');
   assert.equal(await page.locator('#beatSensitivity').inputValue(),'1.45');
   assert.equal(await page.locator('#kickInterval').inputValue(),'300');
+  assert.equal(await page.locator('#audioDelay').inputValue(),'0');
   assert.equal(await page.locator('#bass-detector').inputValue(),'integral');
   assert.equal(await page.locator('#onset-chart').count(),1);
   await page.locator('#bass-detector').selectOption('legacy');
@@ -395,6 +396,7 @@ let browser, server;
   assert.equal(await page.locator('#motion').inputValue(),'70');
   assert.equal(await page.locator('#beatSensitivity').inputValue(),'1.45');
   assert.equal(await page.locator('#kickInterval').inputValue(),'300');
+  assert.equal(await page.locator('#audioDelay').inputValue(),'0');
   results.push('Palettes, extreme thickness/spacing, fixed canvas height, and reset');
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
