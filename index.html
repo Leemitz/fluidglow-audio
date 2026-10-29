@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#090b11">
   <meta name="description" content="FluidGlow Audio — 三片同轴半透平凸透镜，由低中高频驱动，低频激发环形频谱粒子涟漪。">
   <title>FluidGlow Audio — Spectral Lenses</title>
-  <link rel="stylesheet" href="styles.css?v=2.7.7">
+  <link rel="stylesheet" href="styles.css?v=2.8.0">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -50,6 +50,25 @@
         <p class="dynamics-note">动态范围自适应 · 保留强弱变化与起音冲击</p>
         <div class="beat-feedback"><span class="beat-lamp" id="beat-lamp" aria-hidden="true"></span><span>BEAT <small>鼓点确认 → 粒子涟漪</small></span><strong id="beat-count">000</strong></div>
         <div class="onset-debug" aria-live="off">瞬态检测 <span id="onset-debug">等待播放 · 真实音频分析</span></div>
+        <label class="detector-picker" for="bass-detector">
+          <span>低频鼓点算法 <small>两套同时运行，对照触发</small></span>
+          <select id="bass-detector" aria-label="选择低频鼓点检测算法">
+            <option value="integral" selected>正向积分（实验）</option>
+            <option value="legacy">旧版候选检测</option>
+          </select>
+        </label>
+        <details class="onset-inspector" id="onset-inspector">
+          <summary><span>低频积分实时诊断 <small id="detector-counts">积分 0 · 旧版 0</small></span><span aria-hidden="true">⌄</span></summary>
+          <div class="onset-readouts">
+            <span>能量 E <strong id="onset-power">—</strong></span>
+            <span>正向速度 v <strong id="onset-velocity">—</strong></span>
+            <span>积分 S <strong id="onset-integral">—</strong></span>
+            <span>阈值 <strong id="onset-threshold">—</strong></span>
+            <span>命中 <strong id="onset-trigger">—</strong></span>
+          </div>
+          <canvas id="onset-chart" width="660" height="204" role="img" aria-label="最近约七秒低频能量、正向变化速度及滑动积分和动态阈值折线图"></canvas>
+          <p class="onset-note">绿色：积分评分 · 红色虚线：阈值 · 亮色竖线：检测命中。计数来自同一段音频的两套独立检测器，只有选中的算法驱动低音透镜和涟漪。</p>
+        </details>
       </section>
 
       <section class="control-section palette-section" aria-labelledby="palette-heading">
@@ -64,8 +83,8 @@
         <label class="slider-row"><span>视觉响应幅度 <output id="intensity-out">85%</output></span><input id="intensity" type="range" min="0" max="100" step="1" value="85"></label>
         <label class="slider-row"><span>透镜运动幅度 <output id="motion-out">70%</output></span><input id="motion" type="range" min="0" max="100" step="5" value="70"></label>
         <label class="slider-row"><span>鼓点识别灵敏度 <output id="beatSensitivity-out">1.45×</output></span><input id="beatSensitivity" type="range" min="0.6" max="1.8" step="0.05" value="1.45"></label>
-        <label class="slider-row"><span>鼓点最短间隔 <output id="kickInterval-out">300 ms</output></span><input id="kickInterval" type="range" min="300" max="900" step="25" value="300"></label>
-        <p class="dynamics-note">低频透镜只响应确认后的鼓点冲击。想更安静，可降低运动幅度和识别灵敏度，或增大最短间隔。</p>
+        <label class="slider-row"><span>鼓点最短间隔 <output id="kickInterval-out">300 ms</output></span><input id="kickInterval" type="range" min="225" max="900" step="25" value="300"></label>
+        <p class="dynamics-note">低频透镜只响应确认后的鼓点冲击。积分算法默认启用，可在上方切回旧版对照；想更安静可降低识别灵敏度或增大最短间隔。</p>
         <div class="effect-switches">
           <label class="switch-row" for="wave-enabled"><span><strong>鼓点粒子涟漪</strong><small>确认低频鼓点峰值后发出一圈波前</small></span><input id="wave-enabled" type="checkbox" checked role="switch" aria-label="开启鼓点粒子涟漪"></label>
           <label class="switch-row" for="surface-enabled"><span><strong>自主反射光移动</strong><small>轻微移动反射光，透镜保持平凸形状</small></span><input id="surface-enabled" type="checkbox" role="switch" aria-label="开启自主反射光移动"></label>
@@ -98,15 +117,15 @@
       <div class="view-legend"><span class="legend-cross">＋</span><span>OPTICAL STUDY <i>001</i></span></div>
       <div class="view-controls"><span id="view-drag-hint">拖动旋转 · 双击复位</span><button id="reset-view-btn" type="button" title="恢复默认观察方向（键盘 Home）">↺ 恢复视角</button></div>
       <div class="axis-note">Y+ <span>大透镜 → 小透镜</span></div>
-      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.7.7</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
+      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.8.0</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
       <div class="view-bottom"><span>THREE LENSES / ONE AXIS / SPECTRAL RIPPLES</span><span class="movement-indicator"><i></i> COAXIAL MOTION</span></div>
       <div class="drop-hint" id="drop-hint"><span>♫</span> 松开以载入音乐文件</div>
     </div>
   </main>
   <div id="toast" role="status" aria-live="polite"></div>
   <audio id="player" preload="metadata"></audio>
-  <script src="audio-dynamics.js?v=2.7.7"></script>
-  <script src="lenses.js?v=2.7.7"></script>
-  <script src="app.js?v=2.7.7"></script>
+  <script src="audio-dynamics.js?v=2.8.0"></script>
+  <script src="lenses.js?v=2.8.0"></script>
+  <script src="app.js?v=2.8.0"></script>
 </body>
 </html>
