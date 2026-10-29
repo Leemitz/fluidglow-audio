@@ -104,6 +104,7 @@
   let sourceRevision = 0;
   let ctx = null;
   let analyser = null;
+  let playbackDelay = null;
   let fileSource = null;
   let micSource = null;
   let micStream = null;
@@ -119,10 +120,11 @@
   const player = $('player');
   const smoothed = { loudness: 0, bass: 0, mid: 0, high: 0 };
   const INPUT_DEFAULTS = Object.freeze({ sensitivity: 1.25, intensity: 85, motion: 70,
-    beatSensitivity: 1.45, kickInterval: 300, wave: 100 });
+    beatSensitivity: 1.45, kickInterval: 300, audioDelay: 0, wave: 100 });
   const setting = { sensitivity: INPUT_DEFAULTS.sensitivity, intensity: INPUT_DEFAULTS.intensity/100,
     motion: INPUT_DEFAULTS.motion/100, beatSensitivity: INPUT_DEFAULTS.beatSensitivity,
-    kickInterval: INPUT_DEFAULTS.kickInterval/1000, wave: INPUT_DEFAULTS.wave/100,
+    kickInterval: INPUT_DEFAULTS.kickInterval/1000, audioDelay: INPUT_DEFAULTS.audioDelay/1000,
+    wave: INPUT_DEFAULTS.wave/100,
     waveEnabled: true, surfaceEnabled: false, bassDetector: 'integral' };
   let surfaceLevel = 0;
   const meters = {
@@ -172,6 +174,11 @@
       analyser.smoothingTimeConstant = .08; // Float FFT keeps high-level attacks intact.
       analyser.minDecibels = -110;
       analyser.maxDecibels = 0; // Display range only; float FFT is not clipped by these values.
+      // Delay ONLY the audible music. FFT analysis runs on the undelayed
+      // media-source branch, so the picture can lead the speakers by 0-300ms.
+      playbackDelay = ctx.createDelay(.35);
+      playbackDelay.delayTime.value = setting.audioDelay;
+      playbackDelay.connect(ctx.destination);
       frequencyDb = new Float32Array(analyser.frequencyBinCount);
       dynamics = new AudioDynamics(ctx.sampleRate, analyser.fftSize);
       waveform = new Float32Array(analyser.fftSize);
@@ -183,7 +190,15 @@
     if (fileSource) return;
     fileSource = ctx.createMediaElementSource(player);
     fileSource.connect(analyser);
-    fileSource.connect(ctx.destination); // Never connect microphone to speakers.
+    fileSource.connect(playbackDelay); // Only music reaches speakers; never mic.
+  }
+  function updatePlaybackDelay() {
+    if(!ctx||!playbackDelay)return;
+    const param=playbackDelay.delayTime;
+    const now=ctx.currentTime;
+    param.cancelScheduledValues(now);
+    // Smooth live changes to avoid hard jumps/clicks in delayed playback.
+    param.setTargetAtTime(setting.audioDelay,now,.015);
   }
 
   function prepareTrack(src, title, detail, which) {
@@ -520,12 +535,14 @@
     beat.novelty=0;beat.threshold=0;
     toast(setting.bassDetector==='integral'?'已启用低频正向变化积分检测':'已切换回旧版鼓点检测');
   });
-  for (const id of ['sensitivity', 'intensity', 'wave', 'motion', 'beatSensitivity', 'kickInterval']) {
+  for (const id of ['sensitivity', 'intensity', 'wave', 'motion', 'beatSensitivity', 'kickInterval', 'audioDelay']) {
     $(id).addEventListener('input', event => {
       const value = Number(event.target.value);
       const percent = ['intensity','wave','motion'].includes(id);
-      setting[id] = percent ? value/100 : id==='kickInterval' ? value/1000 : value;
-      $(id+'-out').textContent = percent ? `${value}%` : id==='kickInterval' ? `${value} ms` : `${value.toFixed(2)}×`;
+      setting[id] = percent ? value/100 : ['kickInterval','audioDelay'].includes(id) ? value/1000 : value;
+      $(id+'-out').textContent = percent ? `${value}%`
+        : ['kickInterval','audioDelay'].includes(id) ? `${value} ms` : `${value.toFixed(2)}×`;
+      if(id==='audioDelay')updatePlaybackDelay();
     });
   }
 
