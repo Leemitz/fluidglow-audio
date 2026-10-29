@@ -181,7 +181,7 @@ let browser, server;
   await page.mouse.move(dragFrom.x + Math.PI / .006, dragFrom.y, { steps: 20 }); await page.mouse.up();
   await page.waitForTimeout(80);
   assert((await page.evaluate(() => __lens.metrics.axisY[2])) < 0, 'Orbit can view the opposite face');
-  assert.equal(await page.evaluate(() => document.querySelector('canvas').getContext('webgl').getError()), 0);
+  assert.equal(await page.evaluate(() => document.querySelector('#fluid-canvas').getContext('webgl').getError()), 0);
   await page.screenshot({ path: path.join(output, 'lenses-reverse.png') });
   await canvas.dblclick({ position: { x: rect.width / 2, y: rect.height / 2 } });
   assert.deepEqual(await page.evaluate(() => __lens.metrics.viewRotation), [0, 0, 0, 1]);
@@ -418,7 +418,7 @@ let browser, server;
   await page.waitForTimeout(300);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
   await page.screenshot({ path: path.join(output, 'lenses-mobile.png') });
-  assert.equal(await page.evaluate(() => document.querySelector('canvas').getContext('webgl').getError()), 0);
+  assert.equal(await page.evaluate(() => document.querySelector('#fluid-canvas').getContext('webgl').getError()), 0);
   results.push('Live reduced-motion preference, mobile touch orbit/layout, zero GL errors');
 
   const fallback = await browser.newPage();
