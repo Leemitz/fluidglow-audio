@@ -6,7 +6,8 @@
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50,
     bassProfileAmp: 1, bassProfileWave: 1, midProfileAmp: 1, midProfileWave: 1,
-    highProfileAmp: 1, highProfileWave: 1, sideGoldWidth: .10, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
+    highProfileAmp: 1, highProfileWave: 1,
+    bassThickness: 1, midThickness: 1, highThickness: 1, sideGoldWidth: .10, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
     reflection: .72, opacity: .26, glow: 1.30, whiteLight: .60, aura: .20, roughness: .10, edgeGlow: 1.05,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
     convexFrost: .12, faceTransition: 18, waterfallDensity: 1.70, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
@@ -39,17 +40,25 @@
       float wave=max(1.0,u_profile.y);
       float angle=3.14159265/wave;
       float divisor=max(.00001,1.0-cos(angle));
-      float easing=(1.0-cos(angle*rho))/divisor;
-      float derivative=angle*sin(angle*rho)/divisor;
-      float lower=-.50+1.03*amp*easing;
-      float upper=.50+.27*amp*easing;
-      float lowerRim=-.50+1.03*amp;
-      float upperRim=.50+.27*amp;
+      // Shape modifies the COMMON mid-surface only. The local separation
+      // between upper/lower faces is independent from amplitude/wavelength.
+      // This preserves both face positions at r=0 and r=1.
+      float waveShape=(1.0-cos(angle*rho))/divisor;
+      float baseShape=.5-.5*cos(3.14159265*rho);
+      float middle=.65*mix(rho,waveShape,amp);
+      float gap=1.0-.76*baseShape;
+      float lower=middle-.5*gap;
+      float upper=middle+.5*gap;
+      float lowerRim=.53;
+      float upperRim=.77;
+      float waveSlope=angle*sin(angle*rho)/divisor;
+      float middleSlope=.65*mix(1.0,waveSlope,amp);
+      float gapSlope=-.38*3.14159265*sin(3.14159265*rho);
       vec3 localNormal=a_normal;
       float thicknessHeight;
       if(u_surface<1.5){
         float side=u_surface<.5?-1.0:1.0;
-        float slope=(side<0.0?1.03:.27)*amp*derivative;
+        float slope=middleSlope+side*.5*gapSlope;
         float normalR=-side*slope/max(rho,.00001);
         localNormal=vec3(a_position.xy*normalR,-side);
         thicknessHeight=side<0.0?lower:upper;
@@ -191,15 +200,21 @@
       return (1.0-cos(angle*clamp(rho,0.0,1.0)))/denom;
     }
     float faceHeight(float rho,float face,vec2 profile) {
-      float a=clamp(profile.x,0.0,1.0);
-      float e=easeRadius(rho,profile);
-      return face<.5?-.50+1.03*a*e:.50+.27*a*e;
+      float r=clamp(rho,0.0,1.0);
+      float amp=clamp(profile.x,0.0,1.0);
+      float wave=easeRadius(r,profile);
+      float base=.5-.5*cos(3.14159265*r);
+      float middle=.65*mix(r,wave,amp);
+      float gap=1.0-.76*base;
+      return middle+(face<.5?-.5:.5)*gap;
     }
     float faceSlope(float rho,float face,vec2 profile) {
+      float r=clamp(rho,0.0,1.0);
       float angle=3.14159265/max(1.0,profile.y);
-      float derivative=angle*sin(angle*clamp(rho,0.0,1.0))
-        /max(.00001,1.0-cos(angle));
-      return (face<.5?1.03:.27)*clamp(profile.x,0.0,1.0)*derivative;
+      float dWave=angle*sin(angle*r)/max(.00001,1.0-cos(angle));
+      float dMiddle=.65*mix(1.0,dWave,clamp(profile.x,0.0,1.0));
+      float dGap=-.38*3.14159265*sin(3.14159265*r);
+      return dMiddle+(face<.5?-.5:.5)*dGap;
     }
     float faceResidual(vec3 p,float radius,float centerY,float thick,float face,vec2 profile) {
       return p.y-centerY-thick*faceHeight(length(p.xz)/radius,face,profile);
@@ -220,9 +235,8 @@
       float before=hit.x;
       float a=dot(d.xz,d.xz),b=dot(p.xz,d.xz);
       float c=dot(p.xz,p.xz)-radius*radius,disc=b*b-a*c;
-      // Rim tracks amplitude: at zero curvature it is a clear flat slab.
-      float lowerRim=-.50+1.03*clamp(profile.x,0.0,1.0);
-      float upperRim=.50+.27*clamp(profile.x,0.0,1.0);
+      // Fixed rim endpoints: profile controls shape, NOT thickness.
+      float lowerRim=.53,upperRim=.77;
       if(a>.000001&&disc>=0.0){
         float root=sqrt(disc);
         for(int k=0;k<2;k++){
@@ -633,6 +647,10 @@
       const [amp,wave]=profileKeys[i];
       return [Math.max(0,Math.min(1,P[amp])),Math.max(1,Math.min(4,P[wave]))];
     }
+    const thicknessKeys=['bassThickness','midThickness','highThickness'];
+    function thicknessAt(i) {
+      return P.thickness*Math.max(.3,Math.min(2,P[thicknessKeys[i]]))*radii[i]*P.size;
+    }
     let ripplesEnabled = true;
     const currentPalette = copyPalette(options.palette || INITIAL_PALETTE);
     let targetPalette = copyPalette(currentPalette);
@@ -735,7 +753,7 @@
       if (reduce || !ripplesEnabled || !samples?.length || !(strength > 0)) return;
       const r = ripples.reduce((oldest, candidate) => candidate.age > oldest.age ? candidate : oldest);
       r.age = 0; r.bornAt=performance.now();r.strength = Math.max(.1, Math.min(1.4, strength));
-      r.depth = depths[0]-.5*P.thickness*radii[0]*P.size;
+      r.depth = depths[0]-.5*thicknessAt(0);
       r.radius = radii[0] * P.size;
       r.life = P.rippleLife; r.speed = P.rippleSpeed; r.drag=Math.max(0,P.rippleDrag); r.height = P.rippleHeight;
       r.growth = P.rippleGrowth; r.rise = P.rippleRise; r.maxSample = 0;
@@ -778,14 +796,12 @@
       // Bass motion is drum-only: sustained low-frequency level never moves
       // the large lens. Critical damping settles each impulse without jitter.
       depths[0] = (-.34 - springs[0].x*P.motionGain) * P.spread;
-      // Amplitude changes the upper rim; wavelengths preserve rim height
-      // by using a normalized cosine segment. Keep the lenses separated.
-      const upperRim0=.50+.27*profileAt(0)[0];
-      const upperRim1=.50+.27*profileAt(1)[0];
+      // Shape parameters never enter the spacing condition; thickness does.
+      const t0=thicknessAt(0),t1=thicknessAt(1),t2=thicknessAt(2);
       depths[1]=Math.max((.18+(levels.mid*.07+springs[1].x)*P.motionGain*P.midMotion)*P.spread,
-        depths[0]+P.thickness*P.size*(upperRim0*radii[0]-LOWER_CENTER*radii[1])+.10);
+        depths[0]+UPPER_RIM*t0-LOWER_CENTER*t1+.10);
       depths[2]=Math.max((.60+(levels.high*.10+springs[2].x)*P.motionGain*P.highMotion)*P.spread,
-        depths[1]+P.thickness*P.size*(upperRim1*radii[1]-LOWER_CENTER*radii[2])+.10);
+        depths[1]+UPPER_RIM*t1-LOWER_CENTER*t2+.10);
       const cr = Math.cos(P.rotation), sr = Math.sin(P.rotation), ct = Math.cos(P.incline), st = Math.sin(P.incline);
       rotateVector(basisU, cr, sr, 0); rotateVector(basisV, -sr * ct, cr * ct, st);
       rotateVector(axisY, sr * st, -cr * st, ct);
@@ -810,7 +826,7 @@
       for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost', 'finiteBands', 'outerDecay', 'sideGoldWidth']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++){
-        gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
+        gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],thicknessAt(i));
         gl.uniform2f(location(lensProgram,'profile'+i),...profileAt(i));
       }
       // Orbit can pass behind the lenses. Re-sort their two curved faces
@@ -821,7 +837,7 @@
         gl.uniform2f(location(lensProgram,'profile'),...profileAt(i));
         f(lensProgram,'lensFade',i===0?1.0:i===1?P.midFade:P.highFade);
         f(lensProgram, 'radius', radii[i] * P.size); f(lensProgram, 'depth', depths[i]);
-        f(lensProgram, 'thickness', P.thickness * radii[i] * P.size);
+        f(lensProgram, 'thickness', thicknessAt(i));
         f(lensProgram, 'energy', i===0?springs[0].energy:levels[['bass', 'mid', 'high'][i]]);
         f(lensProgram, 'glow', P.glow);
         f(lensProgram, 'surface', axisY[2] >= 0 ? 0 : 1);
@@ -852,7 +868,7 @@
           gl.uniform2f(location(waterfallProgram,'profile'),...profileAt(i));
           f(waterfallProgram,'radius',radii[i]*P.size);
           f(waterfallProgram,'depth',depths[i]);
-          f(waterfallProgram,'thickness',P.thickness*radii[i]*P.size);
+          f(waterfallProgram,'thickness',thicknessAt(i));
           f(waterfallProgram,'fade',i===0?1.0:i===1?P.midFade:P.highFade);
           f(waterfallProgram,'audio',i===0?springs[0].energy:levels[['bass','mid','high'][i]]);
           gl.drawArrays(gl.POINTS,0,FLOW_POINTS);
@@ -878,10 +894,8 @@
           axisY: axisY.slice(), viewRotation: view.slice(), springDisplacement: springs.map(s => s.x),
           // All extents use the agreed scene Y coordinate, not screen Y.
           lensExtentsY: depths.map((centerY,i)=>{
-            const thick=P.thickness*radii[i]*P.size;
-            const amplitude=profileAt(i)[0];
-            const lowerRim=LOWER_CENTER+1.03*amplitude;
-            const upperRim=UPPER_CENTER+.27*amplitude;
+            const thick=thicknessAt(i);
+            const lowerRim=LOWER_RIM,upperRim=UPPER_RIM;
             return {centerY,convexY:centerY+LOWER_CENTER*thick,
               lowerRimY:centerY+lowerRim*thick,
               upperCenterY:centerY+UPPER_CENTER*thick,
