@@ -1,4 +1,4 @@
-/* FluidGlow Audio: symmetric biconvex lenses + spectral wavefronts. MIT.
+/* FluidGlow Audio: concave-upper convex-lower meniscus lenses + spectral wavefronts. MIT.
  * Dependency-free WebGL 1 / GLSL ES 1.00. Legacy FluidGlow remains vendored.
  */
 (function (root) {
@@ -18,7 +18,8 @@
   };
   const MAX_RIPPLES = 6, ANGLES = 576, LANES = 16;
   const FLOW_STREAMS=160,FLOW_DROPS=24,FLOW_POINTS=FLOW_STREAMS*FLOW_DROPS;
-  const EDGE_RATIO = .12;
+  // Y coordinates per unit of the lens's central thickness.
+  const LOWER_CENTER=-.50, LOWER_RIM=.53, UPPER_CENTER=.50, UPPER_RIM=.77;
   const VERT = `
     attribute vec3 a_position, a_normal;
     uniform vec2 u_res, u_pan;
@@ -27,8 +28,8 @@
     varying vec3 v_normal, v_local, v_position;
     void main() {
       vec3 local = vec3(a_position.xy * u_radius, a_position.z * u_thickness);
-      // Scene +Y runs from large to small. u_depth marks the symmetry
-      // plane: identical cosine-shaped caps extend along both +/-Y.
+      // Scene +Y runs from large to small: upper (+Y) face is concave,
+      // lower (-Y) face is convex, both using a cosine-eased profile.
       vec3 world = u_diskX * local.x + u_diskZ * local.y + u_axisY * (u_depth - local.z);
       v_position = world;
       v_local = a_position;
@@ -150,95 +151,102 @@
       float blur=frost*(.14+.045*t/max(max(abs(r.x),abs(r.y)),abs(r.z)));
       return filteredStripes(distanceToLight,base,blur,1.4);
     }
-    // Approximate one-bounce intersections with two cosine caps and
-    // their thin cylindrical rim, consistent with the rasterized mesh.
+    // A single-bounce approximation to the same two asymmetric cosine
+    // surfaces as the rasterized meniscus lens.
     void keepHit(float t,vec3 normal,float kind,inout vec4 hit,inout float part) {
       if(t>.003&&t<hit.x){hit=vec4(t,normalize(normal));part=kind;}
     }
-    float capHalfRatio(float radius01) {
-      float u=clamp(radius01,0.0,1.0);
-      return .5*(.12+.88*.5*(1.0+cos(3.14159265*u)));
+    float easeRadius(float rho) {
+      return .5-.5*cos(3.14159265*clamp(rho,0.0,1.0));
     }
-    float faceResidual(vec3 point,float radius,float centerY,float thick,float side) {
-      return point.y-(centerY+side*thick*capHalfRatio(length(point.xz)/radius));
+    float faceHeight(float rho,float face) {
+      float e=easeRadius(rho);
+      return face<.5?-.50+1.03*e:.50+.27*e;
+    }
+    float faceSlope(float rho,float face) {
+      return (face<.5?1.03:.27)*1.570796327*sin(3.14159265*clamp(rho,0.0,1.0));
+    }
+    float faceResidual(vec3 p,float radius,float centerY,float thick,float face) {
+      return p.y-centerY-thick*faceHeight(length(p.xz)/radius,face);
+    }
+    float bodyResidual(vec3 p,float radius,float centerY,float thick){
+      float rho=length(p.xz)/radius;
+      float lo=centerY+thick*faceHeight(rho,0.0);
+      float hi=centerY+thick*faceHeight(rho,1.0);
+      return max(lo-p.y,p.y-hi);
     }
     void traceLens(vec3 p,vec3 d,vec3 lens,inout vec4 hit,inout float part,inout vec3 picked) {
       float radius=lens.x,centerY=lens.y,thick=lens.z;
       vec3 oc=p-vec3(0.0,centerY,0.0);
-      float bound=radius*radius+thick*thick*.25;
+      float bound=radius*radius+thick*thick*.85;
       float projection=dot(oc,d);
       if(projection*projection-dot(oc,oc)+bound<0.0)return;
       if(projection>0.0&&dot(oc,oc)>bound)return;
       float before=hit.x;
-      // Symmetric, narrow cylindrical edge (12% of maximum thickness).
       float a=dot(d.xz,d.xz),b=dot(p.xz,d.xz);
       float c=dot(p.xz,p.xz)-radius*radius,disc=b*b-a*c;
+      // Narrow rim: lower edge at +.53 T, upper edge at +.77 T.
       if(a>.000001&&disc>=0.0){
         float root=sqrt(disc);
         for(int k=0;k<2;k++){
           float t=(-b+(k==0?-root:root))/a;
           vec3 q=p+d*t;
-          if(abs(q.y-centerY)<=thick*.061)
+          if(q.y>=centerY+thick*.529&&q.y<=centerY+thick*.771)
             keepHit(t,vec3(q.x,0.0,q.z),2.0,hit,part);
         }
       }
-      // Each cap lies in a known slab. Eight bisected steps accurately
-      // recover the same cosine surface used by the visible geometry.
+      // For non-grazing rays, bracket both monotone cosine Y-heights
+      // and bisect the exact surface, including the outward-warped rim.
       if(abs(d.y)>.0008){
         for(int face=0;face<2;face++){
-          float side=face==0?-1.0:1.0;
-          float ta=(centerY+side*thick*.06-p.y)/d.y;
-          float tb=(centerY+side*thick*.5-p.y)/d.y;
+          float kind=float(face);
+          float ta=(centerY+thick*faceHeight(0.0,kind)-p.y)/d.y;
+          float tb=(centerY+thick*faceHeight(1.0,kind)-p.y)/d.y;
           float lo=max(.003,min(ta,tb)),hi=min(hit.x,max(ta,tb));
           if(hi<=lo)continue;
-          float flo=faceResidual(p+d*lo,radius,centerY,thick,side);
-          float fhi=faceResidual(p+d*hi,radius,centerY,thick,side);
+          float flo=faceResidual(p+d*lo,radius,centerY,thick,kind);
+          float fhi=faceResidual(p+d*hi,radius,centerY,thick,kind);
           if(flo*fhi>0.0)continue;
-          for(int j=0;j<8;j++){
+          for(int j=0;j<9;j++){
             float mid=(lo+hi)*.5;
-            float value=faceResidual(p+d*mid,radius,centerY,thick,side);
-            if(flo*value<=0.0)hi=mid;
-            else{lo=mid;flo=value;}
+            float v=faceResidual(p+d*mid,radius,centerY,thick,kind);
+            if(flo*v<=0.0)hi=mid;else{lo=mid;flo=v;}
           }
           float t=(lo+hi)*.5;
           vec3 q=p+d*t;
-          float distanceXZ=length(q.xz),rho=distanceXZ/radius;
+          float rad=length(q.xz),rho=rad/radius;
           if(rho>1.001)continue;
-          float slope=(thick/radius)*.88*.785398163*sin(3.14159265*clamp(rho,0.0,1.0));
-          vec3 normal=vec3(q.x*slope/max(distanceXZ,.00001),side,
-            q.z*slope/max(distanceXZ,.00001));
-          keepHit(t,normal,float(face),hit,part);
+          float side=face==0?-1.0:1.0;
+          float slope=(thick/radius)*faceSlope(rho,kind);
+          vec3 normal=vec3(-side*q.x*slope/max(rad,.00001),side,
+            -side*q.z*slope/max(rad,.00001));
+          keepHit(t,normal,kind,hit,part);
         }
       }
-      // Grazing rays can enter a convex face radially while d.y is nearly
-      // zero, even when neither Y-slab bracket crosses the profile.
-      // Trace from the cylinder entrance toward closest lateral approach
-      // and bisect the exact biconvex surface when there is an entry.
+      // Radial entry at extreme grazing angles, missed by Y brackets.
       if(hit.x>=before&&a>.000001&&disc>=0.0&&abs(d.y)<.25){
         float root=sqrt(disc);
-        float entry=max(.003,(-b-root)/a);
-        float nearest=min(hit.x,-b/a);
+        float entry=max(.003,(-b-root)/a),nearest=min(hit.x,-b/a);
         if(nearest>entry){
-          vec3 q0=p+d*entry,q1=p+d*nearest;
-          float v0=abs(q0.y-centerY)-thick*capHalfRatio(length(q0.xz)/radius);
-          float v1=abs(q1.y-centerY)-thick*capHalfRatio(length(q1.xz)/radius);
+          float v0=bodyResidual(p+d*entry,radius,centerY,thick);
+          float v1=bodyResidual(p+d*nearest,radius,centerY,thick);
           if(v0>=0.0&&v1<=0.0){
             float lo=entry,hi=nearest;
             for(int step=0;step<9;step++){
               float mid=(lo+hi)*.5;
-              vec3 q=p+d*mid;
-              float value=abs(q.y-centerY)-thick*capHalfRatio(length(q.xz)/radius);
-              if(value>0.0)lo=mid;else hi=mid;
+              if(bodyResidual(p+d*mid,radius,centerY,thick)>0.0)lo=mid;else hi=mid;
             }
             float t=(lo+hi)*.5;
             vec3 q=p+d*t;
-            float distanceXZ=length(q.xz);
-            float rho=clamp(distanceXZ/radius,0.0,1.0);
-            float slope=(thick/radius)*.88*.785398163*sin(3.14159265*rho);
-            float side=q.y<centerY?-1.0:1.0;
-            vec3 normal=vec3(q.x*slope/max(distanceXZ,.00001),side,
-              q.z*slope/max(distanceXZ,.00001));
-            keepHit(t,normal,side<0.0?0.0:1.0,hit,part);
+            float rad=length(q.xz),rho=rad/radius;
+            float bottom=centerY+thick*faceHeight(rho,0.0);
+            float top=centerY+thick*faceHeight(rho,1.0);
+            float kind=abs(q.y-bottom)<abs(q.y-top)?0.0:1.0;
+            float side=kind<.5?-1.0:1.0;
+            float slope=(thick/radius)*faceSlope(rho,kind);
+            vec3 normal=vec3(-side*q.x*slope/max(rad,.00001),side,
+              -side*q.z*slope/max(rad,.00001));
+            keepHit(t,normal,kind,hit,part);
           }
         }
       }
@@ -334,7 +342,7 @@
       // Guide light fills the cylindrical sidewall, brightest through its
       // thickness. Face boundaries no longer have separate glowing circles.
       if (u_surface > 1.5) {
-        float across = clamp((v_local.z+.06)/.12,0.0,1.0);
+        float across=clamp((-v_local.z-.53)/.24,0.0,1.0);
         float guide = u_edgeGlow*(.55+.45*sin(across*3.14159265))*(.70+.30*fresnel);
         col = guideTint()*guide*(1.0+.16*u_energy);
         alpha = u_opacity*(.35+.40*guide);
@@ -482,35 +490,39 @@
       const b = gl.createBuffer(); buffers.push(b); gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); return b;
     }
-    // Cosine-eased double-convex profile. At both the centre (r=0) and the
-    // edge (r=1) the slope is exactly zero; maximum slope is at r=.5.
+    // Both faces are raised toward the outer edge, with zero derivative
+    // at the centre and edge. The upper surface is a bowl (+Y concave);
+    // the lower surface bulges downwards (-Y convex).
     const segments=128,rings=40,cap=[],back=[],side=[];
-    const edge=EDGE_RATIO;
-    function capVertex(r,a,sign){
+    function capVertex(r,a,face){
       const x=r*Math.cos(a),y=r*Math.sin(a);
-      const half=.5*(edge+.5*(1-edge)*(1+Math.cos(Math.PI*r)));
-      const slope=(1-edge)*Math.PI*.25*Math.sin(Math.PI*r);
-      const normalRadial=slope/Math.max(r,.00001);
-      return [x,y,sign*half,x*normalRadial,y*normalRadial,sign];
+      const easing=.5*(1-Math.cos(Math.PI*r));
+      const low=face===0;
+      const height=(low?LOWER_CENTER:UPPER_CENTER)
+        +(low?LOWER_RIM-LOWER_CENTER:UPPER_RIM-UPPER_CENTER)*easing;
+      const slope=(low?LOWER_RIM-LOWER_CENTER:UPPER_RIM-UPPER_CENTER)
+        *Math.PI*.5*Math.sin(Math.PI*r);
+      const side=low?-1:1;
+      const radial=-side*slope/Math.max(r,.00001);
+      return [x,y,-height,x*radial,y*radial,-side];
     }
     for(let ring=0;ring<rings;ring++)for(let j=0;j<segments;j++){
       const a=j/segments*Math.PI*2,b=(j+1)/segments*Math.PI*2;
       const r0=ring/rings,r1=(ring+1)/rings;
-      cap.push(...capVertex(r0,a,1),...capVertex(r1,a,1),...capVertex(r1,b,1),
-        ...capVertex(r0,a,1),...capVertex(r1,b,1),...capVertex(r0,b,1));
-      back.push(...capVertex(r0,a,-1),...capVertex(r1,b,-1),...capVertex(r1,a,-1),
-        ...capVertex(r0,a,-1),...capVertex(r0,b,-1),...capVertex(r1,b,-1));
+      cap.push(...capVertex(r0,a,0),...capVertex(r1,a,0),...capVertex(r1,b,0),
+        ...capVertex(r0,a,0),...capVertex(r1,b,0),...capVertex(r0,b,0));
+      back.push(...capVertex(r0,a,1),...capVertex(r1,b,1),...capVertex(r1,a,1),
+        ...capVertex(r0,a,1),...capVertex(r0,b,1),...capVertex(r1,b,1));
       if(ring===0){
-        const sa=[Math.cos(a),Math.sin(a),-edge*.5,Math.cos(a),Math.sin(a),0];
-        const sb=[Math.cos(b),Math.sin(b),-edge*.5,Math.cos(b),Math.sin(b),0];
-        const sc=sa.slice(),sd=sb.slice();sc[2]=edge*.5;sd[2]=edge*.5;
+        const sa=[Math.cos(a),Math.sin(a),-LOWER_RIM,Math.cos(a),Math.sin(a),0];
+        const sb=[Math.cos(b),Math.sin(b),-LOWER_RIM,Math.cos(b),Math.sin(b),0];
+        const sc=sa.slice(),sd=sb.slice();sc[2]=-UPPER_RIM;sd[2]=-UPPER_RIM;
         side.push(...sa,...sc,...sd,...sa,...sd,...sb);
       }
     }
     const capBuffer=buffer(new Float32Array(cap)),backBuffer=buffer(new Float32Array(back)),
       sideBuffer=buffer(new Float32Array(side));
-    // Reusable 3840-point cloud: 160 inwards rays by 24 staggered drops.
-    // Each point keeps a stable radial stream and layers within the lens.
+    // Keep the existing inward waterfall cloud; updated in the next pass.
     const flowData=new Float32Array(FLOW_POINTS*4);
     for(let stream=0;stream<FLOW_STREAMS;stream++){
       const jitter=((stream*73)%173)/173-.5;
@@ -686,11 +698,11 @@
       // Bass motion is drum-only: sustained low-frequency level never moves
       // the large lens. Critical damping settles each impulse without jitter.
       depths[0] = (-.34 - springs[0].x*P.motionGain) * P.spread;
-      // Each neighbour's convex apex must clear the previous rear apex.
+      // Highest upper rim of one lens clears the lowest convex apex of next.
       depths[1]=Math.max((.18+(levels.mid*.07+springs[1].x)*P.motionGain*P.midMotion)*P.spread,
-        depths[0]+.5*P.thickness*P.size*(radii[0]+radii[1])+.10);
+        depths[0]+P.thickness*P.size*(UPPER_RIM*radii[0]-LOWER_CENTER*radii[1])+.10);
       depths[2]=Math.max((.60+(levels.high*.10+springs[2].x)*P.motionGain*P.highMotion)*P.spread,
-        depths[1]+.5*P.thickness*P.size*(radii[1]+radii[2])+.10);
+        depths[1]+P.thickness*P.size*(UPPER_RIM*radii[1]-LOWER_CENTER*radii[2])+.10);
       const cr = Math.cos(P.rotation), sr = Math.sin(P.rotation), ct = Math.cos(P.incline), st = Math.sin(P.incline);
       rotateVector(basisU, cr, sr, 0); rotateVector(basisV, -sr * ct, cr * ct, st);
       rotateVector(axisY, sr * st, -cr * st, ct);
@@ -715,8 +727,8 @@
       for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost', 'finiteBands', 'outerDecay']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
       for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
-      // Orbit can pass behind the lenses. Re-sort transparent objects and
-      // their flat/convex surfaces whenever the camera crosses the disk plane.
+      // Orbit can pass behind the lenses. Re-sort their two curved faces
+      // and transparent sidewall when the view crosses the disk plane.
       const order = axisY[2] >= 0 ? [0, 1, 2] : [2, 1, 0];
       for (const i of order) {
         f(lensProgram,'lensIndex',i);
@@ -777,10 +789,14 @@
            waterfallCount:FLOW_POINTS*3,waterfallSpeed:P.waterfallSpeed,
           axisY: axisY.slice(), viewRotation: view.slice(), springDisplacement: springs.map(s => s.x),
           // All extents use the agreed scene Y coordinate, not screen Y.
-          lensExtentsY: depths.map((centerY,i)=>({centerY,
-             flatY:centerY+.5*P.thickness*radii[i]*P.size,
-             convexY:centerY-.5*P.thickness*radii[i]*P.size,
-             backY:centerY+.5*P.thickness*radii[i]*P.size})),
+          lensExtentsY: depths.map((centerY,i)=>{
+            const thick=P.thickness*radii[i]*P.size;
+            return {centerY,convexY:centerY+LOWER_CENTER*thick,
+              lowerRimY:centerY+LOWER_RIM*thick,
+              upperCenterY:centerY+UPPER_CENTER*thick,
+              upperRimY:centerY+UPPER_RIM*thick,
+              backY:centerY+UPPER_RIM*thick,flatY:centerY+UPPER_RIM*thick};
+          }),
           rippleProfiles: active.map(r => {
             const travel = rippleDistance(r), lift = travel * r.rise;
             const expansionSpeed=r.drag<.001 ? r.speed : r.speed*r.drag*Math.exp(-r.drag*r.age/r.life)/(-Math.expm1(-r.drag));
