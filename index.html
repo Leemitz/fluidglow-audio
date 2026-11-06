@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#090b11">
   <meta name="description" content="FluidGlow Audio — 三片上凹下凸的透明余弦弯月透镜，由低中高频驱动，低频激发环形频谱粒子涟漪。">
   <title>FluidGlow Audio — Spectral Lenses</title>
-  <link rel="stylesheet" href="styles.css?v=2.9.1">
+  <link rel="stylesheet" href="styles.css?v=2.9.2">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -105,7 +105,7 @@
             <button type="button" data-light-layout="2" aria-pressed="false">同心光环</button>
             <button type="button" data-light-layout="0" aria-pressed="false">经典双光带</button>
           </div>
-          <p>玫瑰金与白色宽光带在默认视角同时呈现，可分别调节间距、宽度与位置。上表面凹入、下表面凸出，镜体清透无暖色底膜；仅反射、边缘菲涅耳和镜内粒子显色。中心保留 5 组金/暗/白周期光带，外围平滑衰减，瀑布粒子持续外密内疏地流向圆心。</p>
+          <p>玫瑰金与白色宽光带在默认视角同时呈现，可分别调节间距、宽度与位置。三片透镜各自控制余弦剖面的幅度（0–1）与波长（至少一个透镜直径），确保只有一个峰。侧壁上下镀金细线可以从 0% 延伸到全侧面 100%；固定在外缘的高密度粒子持续向圆心发射。玻璃主体依旧保持清透，中央保留五组金白光带。</p>
         </div>
         <div id="fluid-parameter-list" class="module-controls"></div>
         <p class="module-footnote">三片透镜沿同一轴线响应各自频段。涟漪高度来自 35 Hz–10 kHz 的对数频谱，发出后逐渐放大、淡出；同屏最多六圈。</p>
@@ -119,15 +119,15 @@
       <div class="view-legend"><span class="legend-cross">＋</span><span>OPTICAL STUDY <i>001</i></span></div>
       <div class="view-controls"><span id="view-drag-hint">拖动旋转 · 双击复位</span><button id="reset-view-btn" type="button" title="恢复默认观察方向（键盘 Home）">↺ 恢复视角</button></div>
       <div class="axis-note">Y+ <span>大透镜 → 小透镜</span></div>
-      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.9.1</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
+      <div class="view-caption"><div class="vertical-line"></div><div><div class="visual-name">SPECTRAL<br>RESONANCE <span class="caption-version">V2.9.2</span></div><p id="visual-status">体验歌单已就绪 · 点击播放，让音乐驱动画面</p></div></div>
       <div class="view-bottom"><span>THREE LENSES / ONE AXIS / SPECTRAL RIPPLES</span><span class="movement-indicator"><i></i> COAXIAL MOTION</span></div>
       <div class="drop-hint" id="drop-hint"><span>♫</span> 松开以载入音乐文件</div>
     </div>
   </main>
   <div id="toast" role="status" aria-live="polite"></div>
   <audio id="player" preload="metadata"></audio>
-  <script src="audio-dynamics.js?v=2.9.1"></script>
-  <script src="lenses.js?v=2.9.1"></script>
-  <script src="app.js?v=2.9.1"></script>
+  <script src="audio-dynamics.js?v=2.9.2"></script>
+  <script src="lenses.js?v=2.9.2"></script>
+  <script src="app.js?v=2.9.2"></script>
 </body>
 </html>
