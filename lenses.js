@@ -9,7 +9,7 @@
     highProfileAmp: 1, highProfileWave: 1, sideGoldWidth: 0, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
     reflection: .72, opacity: .26, glow: 1.30, whiteLight: .60, aura: .20, roughness: .10, edgeGlow: 1.05,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
-    convexFrost: .12, faceTransition: 18, waterfallDensity: 1.55, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
+    convexFrost: .12, faceTransition: 18, waterfallDensity: 1.70, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
     rippleSpeed: .78, rippleLife: 3.4, rippleDrag: 3, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
     zoom: 1, posX: 0, posY: .08, motionGain: .70
@@ -19,7 +19,7 @@
     c: [.604, .380, .341], bg: [.031, .020, .027], mode: 1
   };
   const MAX_RIPPLES = 6, ANGLES = 576, LANES = 16;
-  const FLOW_STREAMS=240,FLOW_DROPS=40,FLOW_POINTS=FLOW_STREAMS*FLOW_DROPS;
+  const FLOW_STREAMS=360,FLOW_DROPS=64,FLOW_POINTS=FLOW_STREAMS*FLOW_DROPS;
   // Y coordinates per unit of the lens's central thickness.
   const LOWER_CENTER=-.50, LOWER_RIM=.53, UPPER_CENTER=.50, UPPER_RIM=.77;
   const VERT = `
@@ -459,6 +459,7 @@
     uniform vec3 u_diskX, u_diskZ, u_axisY;
     uniform float u_zoom, u_time, u_speed, u_radius, u_depth,
       u_thickness, u_density, u_audio, u_fade, u_dpr;
+    uniform vec2 u_profile;
     varying float v_alpha, v_seed, v_rim;
     void main() {
       float seed=a_flow.z;
@@ -468,11 +469,16 @@
       float cycle=fract(a_flow.y+u_time*u_speed*(.88+.24*seed));
       float phase=pow(cycle,3.2);
       float r=1.0-phase;
-      float angle=a_flow.x+.042*sin(phase*8.0+seed*21.0)*(1.0-r);
-      // Place each point strictly BETWEEN the +Y concavity and -Y convexity.
-      float easing=.5-.5*cos(3.14159265*r);
-      float lower=-.50+1.03*easing;
-      float upper=.50+.27*easing;
+      // Each emitter has a FIXED angle around the rim; only its radius
+      // changes. No angular drift, swirl or rotating source position.
+      float angle=a_flow.x;
+      // Use the very same user-controlled profile as the glass surface.
+      float wave=max(1.0,u_profile.y);
+      float arc=3.14159265/wave;
+      float easing=(1.0-cos(arc*r))/max(.00001,1.0-cos(arc));
+      float amp=clamp(u_profile.x,0.0,1.0);
+      float lower=-.50+1.03*amp*easing;
+      float upper=.50+.27*amp*easing;
       float inside=clamp(.5+(a_flow.w*2.0-1.0)*.36,.12,.88);
       float height=mix(lower,upper,inside);
       vec3 world=(u_diskX*cos(angle)+u_diskZ*sin(angle))*(u_radius*r)
@@ -588,11 +594,12 @@
     }
     const capBuffer=buffer(new Float32Array(cap)),backBuffer=buffer(new Float32Array(back)),
       sideBuffer=buffer(new Float32Array(side));
-    // 240 radial streams x 40 points: 9,600 grains per lens. The nonlinear
-    // travel mapping makes the edge denser at every animation instant.
+    // 360 FIXED rim emitters x 64 staggered drops = 23,040 grains per
+    // lens (69,120 for three). Radial travel concentrates points at rim.
     const flowData=new Float32Array(FLOW_POINTS*4);
     for(let stream=0;stream<FLOW_STREAMS;stream++){
       const jitter=((stream*73)%173)/173-.5;
+      // The angle is determined ONCE; the GPU never modifies it with time.
       const angle=2*Math.PI*(stream+jitter*.55)/FLOW_STREAMS;
       const seed=((stream*61)%167)/167;
       for(let drop=0;drop<FLOW_DROPS;drop++){
