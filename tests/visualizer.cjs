@@ -147,6 +147,9 @@ let browser, server;
   let metrics = await page.evaluate(() => __lens.metrics);
   assert.deepEqual(metrics.radii, [1, .76, .54]);
   assert.equal(metrics.particlesPerRipple,9216);
+  assert.equal(metrics.waterfallCount,11520,'Three lens interiors must have flowing point clouds');
+  assert.equal(await page.locator('[data-param="waterfallDensity"]').inputValue(),'0.85');
+  assert.equal(await page.locator('[data-param="waterfallSpeed"]').inputValue(),'0.24');
   assert.equal(metrics.sideSaturation,.18);
   assert.equal(await page.locator('[data-palette="bronze"]').getAttribute('aria-pressed'),'true');
   assert.equal(await page.locator('#motion').inputValue(),'70');
@@ -164,7 +167,8 @@ let browser, server;
   await page.screenshot({ path: path.join(output, 'lenses-desktop.png') });
   results.push('WebGL compiles; playlist waits for playback; manual preview emits; ordered radii and depths');
 
-  assert(metrics.lensExtentsY.every(lens => lens.convexY < lens.flatY), 'Convex face must extend along -Y');
+  assert(metrics.lensExtentsY.every(lens => lens.convexY < lens.centerY && lens.centerY < lens.backY),
+    'Both cosine convex faces must be symmetric about the lens center');
   assert.equal(await page.evaluate(() => __lens.params.thickness), .50);
   assert.equal(await page.evaluate(() => __lens.params.bandWidth), 2.6);
   const canvas = page.locator('#fluid-canvas'), rect = await canvas.boundingBox();
@@ -192,8 +196,8 @@ let browser, server;
   assert.deepEqual(await page.evaluate(() => __lens.metrics.viewRotation), [0, 0, 0, 1]);
   results.push('Thick lenses face -Y; wider bands; pointer orbit, opposite view, button/double-click/keyboard reset');
 
-  // Isolate real GPU draws: flat face only, then sidewall only. This tests
-  // reflection on the plane rather than inferring it from the convex face.
+  // Isolate real GPU draws: rear convex face only, then the thin sidewall.
+  // Both faces now carry the same reflective and frosted material.
   const probeStats=await page.evaluate(async()=>{
     const original=__lens, element=document.createElement('canvas');
     element.id='material-probe'; element.style.cssText='position:fixed;left:0;top:0;width:720px;height:720px;z-index:99';
@@ -238,8 +242,8 @@ let browser, server;
     function difference(a,b){let n=0;for(let i=0;i<a.length;i+=4)if(Math.abs(a[i]-b[i])+Math.abs(a[i+1]-b[i+1])+Math.abs(a[i+2]-b[i+2])>12)n++;return n}
     async function brightness(){return bright(await pixels())}
     const flat=await brightness();
-    // Clear-glass far face must not restore the old narrow ghost pair.
-    // The default frosted cap is intentionally visible as a soft veil.
+    // Both biconvex sides intentionally carry similar reflection; the
+    // former flat-versus-frosted ghost suppression no longer applies.
     mode='far';probe.setParams({convexFrost:0});const farGhost=await brightness();
     probe.setParams({convexFrost:.78});mode='flat';
     probe.setParams({reflection:0}); const flatWithoutReflection=await brightness();
@@ -306,8 +310,8 @@ let browser, server;
       midGain:midBoost/midBase,highGain:highBoost/highBase};
   });
   assert(probeStats.flat>1000,JSON.stringify(probeStats));
-  assert(probeStats.flatWithoutReflection<100,JSON.stringify(probeStats));
-  assert(probeStats.farGhost<100,'Far-face ghost bands must be removed: '+JSON.stringify(probeStats));
+  assert(probeStats.flatWithoutReflection<probeStats.flat,'Reflection should add energy to the back curved receiver');
+  assert(probeStats.farGhost>100,'Opposite convex surface must now also receive studio reflections: '+JSON.stringify(probeStats));
   assert(probeStats.side>500,JSON.stringify(probeStats));
   assert.equal(probeStats.lines,0,'Separate face outline circles must not be drawn');
   assert(probeStats.volumeDrift<1e-6,'Sustained bass level must not move the large lens');
@@ -317,7 +321,7 @@ let browser, server;
   assert(probeStats.sideChromaRatio<.5,'Side guide must be substantially less saturated');
   assert(probeStats.mediumOnBass>200&&probeStats.highOnMedium>200,'Adjacent lenses must appear in the receiving lens');
   assert(probeStats.mediumReflectionMoves>100&&probeStats.highReflectionMoves>100,'Reflections must follow the adjacent lens positions');
-  assert(probeStats.fresnelPixels>100&&probeStats.movingFresnel>5,'Flat rim must have a view-dependent Fresnel arc');
+  assert(probeStats.fresnelPixels>100&&probeStats.movingFresnel>5,'Both convex rims must have view-dependent Fresnel arcs');
   assert(probeStats.midGain>1.6&&probeStats.highGain>1.8,'Mid and high motion gain must be visibly amplified');
   console.log('GPU material probe:',JSON.stringify(probeStats));
   results.push({analyticUnlitReflectionsAndSideGuide:probeStats});
@@ -387,8 +391,8 @@ let browser, server;
   await page.locator('[data-param="spread"]').evaluate(el => { el.value = '.65'; el.dispatchEvent(new Event('input')); });
   await page.waitForTimeout(180);
   metrics = await page.evaluate(() => __lens.metrics);
-  assert(metrics.lensExtentsY[1].convexY >= metrics.lensExtentsY[0].flatY + .099);
-  assert(metrics.lensExtentsY[2].convexY >= metrics.lensExtentsY[1].flatY + .099);
+  assert(metrics.lensExtentsY[1].convexY >= metrics.lensExtentsY[0].backY + .099);
+  assert(metrics.lensExtentsY[2].convexY >= metrics.lensExtentsY[1].backY + .099);
   assert.equal(await page.locator('#fluid-canvas').evaluate(el => el.clientHeight), heightBefore);
   await page.locator('#reset-btn').click();
   assert.equal(await page.locator('[data-param="thickness"]').inputValue(), '0.5');
