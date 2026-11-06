@@ -5,9 +5,9 @@
   'use strict';
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
-    reflection: .5, opacity: .48, glow: 1.35, whiteLight: .55, aura: .20, roughness: .13, edgeGlow: 1.25,
+    reflection: .72, opacity: .26, glow: 1.30, whiteLight: .60, aura: .20, roughness: .10, edgeGlow: 1.05,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
-    convexFrost: .78, faceTransition: 18, waterfallDensity: .85, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
+    convexFrost: .12, faceTransition: 18, waterfallDensity: 1.55, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
     rippleSpeed: .78, rippleLife: 3.4, rippleDrag: 3, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
     zoom: 1, posX: 0, posY: .08, motionGain: .70
@@ -262,11 +262,18 @@
       vec2 bars=studioBarsLocal(point,reflect(d,n),1.0-step(1.5,part));
       float fr=.04+.96*pow(1.0-abs(dot(n,-d)),5.0);
       float rim=smoothstep(.89,.995,length(point.xz)/picked.x);
-      vec3 color=u_paletteC*.07+(u_paletteB*bars.x*.85
-        +mix(u_paletteA,vec3(1.0),.7)*bars.y*.95*u_whiteLight)*u_light+guideTint()*rim*.60*u_edgeGlow;
-      if(part<1.5)color=mix(color,frostTint()*.32,u_convexFrost*.55);
-      if(part>1.5)color=guideTint()*(.65+.35*fr)*u_edgeGlow;
-      float coverage=(.14+.35*fr+.28*rim+.25*max(bars.x,bars.y))/(1.0+.10*hit.x*hit.x);
+      // Clear glass has ZERO intrinsic pigment. Only reflected softboxes,
+      // Fresnel and the narrow rim may enter a neighbor's reflected image.
+      vec3 color=(u_paletteB*bars.x*.85
+        +mix(u_paletteA,vec3(1.0),.72)*bars.y*.95*u_whiteLight)*u_light
+        +guideTint()*rim*.23*u_edgeGlow;
+      if(part<1.5){
+        float frosting=u_convexFrost*smoothstep(.75,.98,length(point.xz)/picked.x);
+        color+=frostTint()*.05*frosting;
+      }
+      if(part>1.5)color=guideTint()*(.45+.45*fr)*u_edgeGlow;
+      float coverage=(.38*fr+.38*rim+.45*max(bars.x,bars.y))
+        /(1.0+.12*hit.x*hit.x);
       // A distant lens cannot reappear at full brightness in another lens's mirror.
       float reflectedFade=picked.x<(u_lensData1.x+u_lensData2.x)*.5 ? u_highFade
         : (picked.x<(u_lensData0.x+u_lensData1.x)*.5 ? u_midFade : 1.0);
@@ -288,12 +295,16 @@
       float warm = bars.x, cool = bars.y;
       vec3 tint = u_paletteB;
       if (u_paletteMode < .5) tint = .55 + .45 * cos(vec3(0.0, 2.1, 4.2) + n.y * 3.0 + n.x * 2.0);
-      vec3 col = u_paletteC*(.025+.08*fresnel)
-        + (tint*warm*.95 + mix(u_paletteA,vec3(1.0),.70)*cool*1.05*u_whiteLight)*u_light;
-      col = mix(vec3(dot(col, vec3(.299, .587, .114))), col, u_sat);
-      col *= u_glow * (1.0 + u_energy * .30);
-      float alpha = u_opacity * (.07 + fresnel * .25)
-        + u_reflection * (warm * 1.15 + cool * 1.5)*u_light;
+      // Color is emitted by optical events only: no painted lens base,
+      // no diffuse warm coating, no nonzero alpha floor in clear areas.
+      vec3 col=(tint*warm*.95+mix(u_paletteA,vec3(1.0),.78)
+        *cool*1.08*u_whiteLight)*u_light;
+      col=mix(vec3(dot(col,vec3(.299,.587,.114))),col,u_sat);
+      col*=u_glow*(1.0+u_energy*.30);
+      float alpha=u_reflection*(warm*.64+cool*.94)*u_light;
+      // Weak, colorless dielectric reflectance remains at grazing angles.
+      col+=mix(vec3(1.0),u_paletteA,.12)*fresnel*.12*u_opacity;
+      alpha+=fresnel*.16*u_opacity;
       float coherentWeight=surfaceWeight*(1.0-frost*.92);
       // Skip imperceptible coherent images behind the frosted cap. Fade the
       // contribution to zero before the branch, preserving orbit continuity.
@@ -304,27 +315,24 @@
         col=mix(col,other.rgb*u_glow,amount);alpha+=amount*.35;
       }
       if(convex>.5&&frost>.001){
-        // Object-space grain is static on the glass. A diffuse veil and
-        // broadened highlights give the cap a frosted, translucent finish.
-        vec2 cell=floor(v_local.xy*260.0);
-        float grain=fract(52.9829*fract(dot(cell,vec2(.06711,.00583))))-.5;
-        float scatter=.25+.12*abs(n.z);
-        col=mix(col,frostTint()*scatter,frost*.64);
-        col+=frostTint()*grain*.035*frost;
-        alpha+=frost*(.22+.14*fresnel)*(.90+.10*symmetricFacing);
+        // Frost is confined to a narrow peripheral band. The centre is
+        // completely transparent wherever no specular or Fresnel ray hits.
+        float peripheral=smoothstep(.72,.97,length(v_local.xy));
+        float microHaze=frost*peripheral;
+        col+=frostTint()*microHaze*(.018+.026*fresnel);
+        alpha+=microHaze*(.009+.035*fresnel);
       }
       // Fresnel on both actual cosine-shaped curved surfaces.
       // Schlick's grazing response is broadened to remain visible on shallow,
       // frosted convex optics without overwhelming their diffuse veil.
       if(convex>.5&&u_convexFresnel>.001){
         float ndv=clamp(abs(dot(n,view)),0.0,1.0);
-        float schlick=.04+.96*pow(1.0-ndv,5.0);
-        float broad=pow(1.0-ndv,1.15);
-        float capFr=mix(schlick,broad,.82);
-        float capVisibility=(.90+.10*symmetricFacing)*(1.0-.30*frost);
-        float capLight=u_convexFresnel*capFr*capVisibility;
-        col+=mix(u_paletteB,u_paletteA,.82)*capLight*.90;
-        alpha+=capLight*.23;
+        float schlick=pow(1.0-ndv,5.0);
+        float broad=pow(1.0-ndv,1.5);
+        float capFr=mix(schlick,broad,.68);
+        float capLight=u_convexFresnel*capFr*(1.0-.15*frost);
+        col+=mix(vec3(1.0),u_paletteA,.25)*capLight*.72;
+        alpha+=capLight*.18;
       }
       // Both lens faces have the same thin polished Fresnel rim.
       if(u_surface<1.5&&u_fresnelEdge>.001){
@@ -344,11 +352,11 @@
       if (u_surface > 1.5) {
         float across=clamp((-v_local.z-.53)/.24,0.0,1.0);
         float guide = u_edgeGlow*(.55+.45*sin(across*3.14159265))*(.70+.30*fresnel);
-        col = guideTint()*guide*(1.0+.16*u_energy);
-        alpha = u_opacity*(.35+.40*guide);
+        col=mix(vec3(1.0),guideTint(),.22)*guide*.75*(1.0+.12*u_energy);
+        alpha=u_opacity*(.035+.16*guide);
       }
       if (u_surface > 2.5) {
-        alpha = (u_surface < 3.5 ? .09 : .04)*u_edgeGlow;
+        alpha = (u_surface < 3.5 ? .025 : .012)*u_edgeGlow;
       }
       // All surface types fade together, including lens-edge guide light.
       // The front bass lens uses 1.0; the middle and far lens use their
