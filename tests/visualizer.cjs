@@ -147,9 +147,35 @@ let browser, server;
   let metrics = await page.evaluate(() => __lens.metrics);
   assert.deepEqual(metrics.radii, [1, .76, .54]);
   assert.equal(metrics.particlesPerRipple,9216);
-  assert.equal(metrics.waterfallCount,28800,'Three lens interiors must have flowing point clouds');
-  assert.equal(await page.locator('[data-param="waterfallDensity"]').inputValue(),'1.55');
+  assert.equal(metrics.waterfallCount,69120,'Three lens interiors must have flowing point clouds');
+  assert.equal(await page.locator('[data-param="waterfallDensity"]').inputValue(),'1.70');
   assert.equal(await page.locator('[data-param="waterfallSpeed"]').inputValue(),'0.24');
+  for(const band of ['bass','mid','high']){
+    assert.equal(await page.locator('[data-param="'+band+'ProfileAmp"]').inputValue(),'1');
+    assert.equal(await page.locator('[data-param="'+band+'ProfileWave"]').inputValue(),'1');
+  }
+  assert.equal(await page.locator('[data-param="sideGoldWidth"]').inputValue(),'0.1');
+  assert.equal(await page.locator('#fluid-output-sideGoldWidth').textContent(),'10%');
+  for(const [name,value] of [['bassProfileAmp',0],['midProfileAmp',.38],
+    ['highProfileWave',2],['sideGoldWidth',1]]){
+    await page.locator('[data-param="'+name+'"]').evaluate((el,val)=>{
+      el.value=String(val);el.dispatchEvent(new Event('input',{bubbles:true}));
+    },value);
+  }
+  await page.waitForTimeout(100);
+  const changedProfiles=await page.evaluate(()=>__lens.params);
+  assert.equal(changedProfiles.bassProfileAmp,0);
+  assert.equal(changedProfiles.midProfileAmp,.38);
+  assert.equal(changedProfiles.highProfileWave,2);
+  assert.equal(changedProfiles.bassProfileWave,1);
+  assert.equal(changedProfiles.sideGoldWidth,1);
+  assert.equal(await page.locator('#fluid-output-sideGoldWidth').textContent(),'100%');
+  for(const [name,value] of [['bassProfileAmp',1],['midProfileAmp',1],
+    ['highProfileWave',1],['sideGoldWidth',.1]]){
+    await page.locator('[data-param="'+name+'"]').evaluate((el,val)=>{
+      el.value=String(val);el.dispatchEvent(new Event('input',{bubbles:true}));
+    },value);
+  }
   assert.equal(metrics.sideSaturation,.18);
   assert.equal(await page.locator('[data-palette="bronze"]').getAttribute('aria-pressed'),'true');
   assert.equal(await page.locator('#motion').inputValue(),'70');
@@ -207,7 +233,7 @@ let browser, server;
     // slow software GPU and falsely report a changed motion multiplier.
     const nativeFrame=window.requestAnimationFrame;let probeFrame;
     window.requestAnimationFrame=fn=>{probeFrame=fn;return 0};
-    const probe=LensRenderer({canvas:element,maxDpr:1,reflection:1,edgeGlow:0,fresnelEdge:0,interReflection:0});
+    const probe=LensRenderer({canvas:element,maxDpr:1,reflection:1,edgeGlow:0,fresnelEdge:0,interReflection:0,sideGoldWidth:0});
     window.requestAnimationFrame=fn=>fn===probeFrame?0:nativeFrame(fn);
     let probeNow=performance.now();
     function advance(ms){
