@@ -52,10 +52,19 @@
       ['posX', '水平偏移', -.6, .6, .01],
       ['posY', '垂直偏移', -.6, .6, .01]
     ]},
+    { title: '独立剖面曲线 / THREE PROFILES', fields: [
+      ['bassProfileAmp','低频透镜 · 余弦幅度',0,1,.01],
+      ['bassProfileWave','低频透镜 · 波长 / 直径',1,4,.05],
+      ['midProfileAmp','中频透镜 · 余弦幅度',0,1,.01],
+      ['midProfileWave','中频透镜 · 波长 / 直径',1,4,.05],
+      ['highProfileAmp','高频透镜 · 余弦幅度',0,1,.01],
+      ['highProfileWave','高频透镜 · 波长 / 直径',1,4,.05]
+    ]},
     { title: '半透材质 / OPTICS', fields: [
       ['reflection', '反射率', .1, .9, .01],
       ['edgeGlow', '亚克力侧壁导光', 0, 2.5, .05],
       ['edgeSat', '侧壁导光饱和度', 0, 1, .02],
+      ['sideGoldWidth','上下两圈镀金总宽度',0,1,.01],
       ['fresnelEdge', '弯月透镜边缘菲涅耳', 0, 1.8, .05],
       ['convexFresnel', '凸面菲涅耳反射', 0, 2.5, .05],
       ['midFade', '中频透镜亮度', 0, 1, .02],
@@ -600,6 +609,11 @@
   }
   updateLightLayout();
 
+  function formatParameter(key,value,step){
+    if(key==='sideGoldWidth')return Math.round(value*100)+'%';
+    if(key.endsWith('ProfileWave'))return value.toFixed(2)+'×直径';
+    return value.toFixed(step < .01 ? 4 : 2);
+  }
   function buildParameterPanel() {
     const holder = $('fluid-parameter-list');
     for (const group of PARAM_GROUPS) {
@@ -626,14 +640,14 @@
         }
         const output = document.createElement('output');
         output.id = 'fluid-output-' + key;
-        output.textContent = Number(PARAMS[key]).toFixed(step < .01 ? 4 : 2);
+        output.textContent = formatParameter(key,Number(PARAMS[key]),step);
         head.append(text, output);
         const slider = document.createElement('input');
         slider.type = 'range'; slider.min = min; slider.max = max; slider.step = step;
         slider.value = PARAMS[key]; slider.dataset.param = key;
         slider.addEventListener('input', () => {
           PARAMS[key] = Number(slider.value);
-          output.textContent = PARAMS[key].toFixed(step < .01 ? 4 : 2);
+          output.textContent = formatParameter(key,PARAMS[key],step);
         });
         wrap.append(head, slider); section.append(wrap);
       }
