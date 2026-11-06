@@ -53,13 +53,13 @@
       ['posY', '垂直偏移', -.6, .6, .01]
     ]},
     { title: '独立剖面曲线 / THREE PROFILES', fields: [
-      ['bassProfileAmp','低频透镜 · 余弦幅度',0,1,.01],
+      ['bassProfileAmp','低频透镜 · 余弦幅度（不改厚度）',0,1,.01],
       ['bassProfileWave','低频透镜 · 波长 / 直径',1,4,.05],
       ['bassThickness','低频透镜 · 厚度倍率',.4,1.8,.05],
-      ['midProfileAmp','中频透镜 · 余弦幅度',0,1,.01],
+      ['midProfileAmp','中频透镜 · 余弦幅度（不改厚度）',0,1,.01],
       ['midProfileWave','中频透镜 · 波长 / 直径',1,4,.05],
       ['midThickness','中频透镜 · 厚度倍率',.4,1.8,.05],
-      ['highProfileAmp','高频透镜 · 余弦幅度',0,1,.01],
+      ['highProfileAmp','高频透镜 · 余弦幅度（不改厚度）',0,1,.01],
       ['highProfileWave','高频透镜 · 波长 / 直径',1,4,.05],
       ['highThickness','高频透镜 · 厚度倍率',.4,1.8,.05]
     ]},
