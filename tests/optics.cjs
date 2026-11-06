@@ -32,8 +32,11 @@ let browser,server;
     gl.drawArrays=(...args)=>{
       const program=gl.getParameter(gl.CURRENT_PROGRAM);
       if(args[0]===gl.POINTS){
-        if(mode==='particles'){
-          lastParticle={age:gl.getUniform(program,gl.getUniformLocation(program,'u_age')),
+        // The separate inward waterfall has no u_age or u_travel. It must
+        // not override the measurement of the expanding ripple's travel.
+        const ageLoc=gl.getUniformLocation(program,'u_age');
+        if(mode==='particles'&&ageLoc){
+          lastParticle={age:gl.getUniform(program,ageLoc),
             travel:gl.getUniform(program,gl.getUniformLocation(program,'u_travel'))};draw(...args);
         }return;
       }
@@ -60,7 +63,7 @@ let browser,server;
     for(const incline of [-.15,-.55,-.95,-1.30])for(const yaw of [-10,-5,0,5,10]){
       probe.resetView();probe.setParams({incline});
       for(let i=0;i<Math.abs(yaw);i++)canvas.dispatchEvent(new KeyboardEvent('keydown',{key:yaw<0?'ArrowLeft':'ArrowRight'}));
-      await frame();if(probe.metrics.axisY[2]<.15)continue; // Flat face must face the observer.
+      await frame();if(probe.metrics.axisY[2]<.15)continue; // Rear convex face must face the observer.
       const row={incline,yaw,normalZ:probe.metrics.axisY[2]};
       for(const [layout,key]of [[0,'classic'],[1,'multi'],[2,'rings']]){
         probe.setParams({lightLayout:layout});row[key]=await coverage();
@@ -164,7 +167,7 @@ let browser,server;
   });
   console.log(JSON.stringify(stats,null,2));
   assert(stats.angular.views.length>=15);
-  assert(stats.angular.multi.visibleViews>=stats.angular.views.length*.85,'Wide bands must cover most tested flat-face viewing angles');
+  assert(stats.angular.multi.visibleViews>=stats.angular.views.length*.85,'Wide bands must cover most tested back-convex-face viewing angles');
   assert(stats.angular.multi.meanCoverage>stats.angular.classic.meanCoverage*1.5,'Multi-panel studio must materially improve coverage');
   assert(stats.angular.rings.visibleViews>=stats.angular.views.length*.80,'Ring emitters must also cover most tested angles');
   assert(stats.parallel.every(p=>p.maxRowVariation<8),'Every stripe must stay parallel across the planar receiver');
