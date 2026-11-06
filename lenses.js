@@ -604,7 +604,7 @@
       const seed=((stream*61)%167)/167;
       for(let drop=0;drop<FLOW_DROPS;drop++){
         const index=(stream*FLOW_DROPS+drop)*4;
-        const phase=(drop+.5)/FLOW_DROPS+(seed-.5)*.02;
+        const phase=(((drop+.5)/FLOW_DROPS+(seed-.5)*.02)%1+1)%1;
         flowData[index]=angle;flowData[index+1]=phase;
         flowData[index+2]=((stream*31+drop*83)%251)/251;
         flowData[index+3]=((stream*43+drop*29)%263)/263;
