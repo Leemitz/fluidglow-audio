@@ -158,6 +158,7 @@ let browser, server;
   assert.equal(await page.locator('#fluid-output-bassThickness').textContent(),'1.00×');
   assert.equal(await page.locator('[data-param="sideGoldWidth"]').inputValue(),'0.1');
   assert.equal(await page.locator('#fluid-output-sideGoldWidth').textContent(),'10%');
+  const shapeBefore=await page.evaluate(()=>__lens.metrics.lensExtentsY);
   for(const [name,value] of [['bassProfileAmp',0],['midProfileAmp',.38],
     ['highProfileWave',2],['sideGoldWidth',1]]){
     await page.locator('[data-param="'+name+'"]').evaluate((el,val)=>{
@@ -165,7 +166,6 @@ let browser, server;
     },value);
   }
   await page.waitForTimeout(100);
-  const shapeBefore=await page.evaluate(()=>__lens.metrics.lensExtentsY);
   const changedProfiles=await page.evaluate(()=>__lens.params);
   assert.equal(changedProfiles.bassProfileAmp,0);
   assert.equal(changedProfiles.midProfileAmp,.38);
