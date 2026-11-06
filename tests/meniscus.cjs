@@ -28,7 +28,7 @@ const gl={
   getUniformLocation(program,name){return {program,name}},
   useProgram(p){this.program=p},
   uniform1f(loc,v){loc.program.uniforms[loc.name]=v},
-  uniform2f(){},uniform3f(){},uniform3fv(){},
+  uniform2f(loc,a,b){loc.program.uniforms[loc.name]=[a,b]},uniform3f(){},uniform3fv(){},
   disableVertexAttribArray(){},enableVertexAttribArray(){},vertexAttribPointer(){},
   viewport(){},clearColor(){},clear(){},disable(){},enable(){},blendFunc(){},
   drawArrays(mode,start,count){
@@ -47,7 +47,8 @@ try{
   assert.equal(probe.ready,true);
   assert.equal(probe.params.convexFrost,.12);
   assert.equal(probe.params.opacity,.26);
-  assert.equal(probe.params.waterfallDensity,1.55);
+  assert.equal(probe.params.waterfallDensity,1.70);
+  assert.equal(probe.params.sideGoldWidth,.10);
 
   const faceLength=128*40*6*6;
   const faces=gl.buffers.filter(b=>b.data.length===faceLength);
@@ -83,8 +84,8 @@ try{
     assert(slope(fn,.5)>slope(fn,.2));
     assert(slope(fn,.5)>slope(fn,.8));
   }
-  const flow=gl.buffers.find(b=>b.data.length===240*40*4);
-  assert(flow,'Need 9600 waterfall particles per lens');
+  const flow=gl.buffers.find(b=>b.data.length===360*64*4);
+  assert(flow,'Need 23040 stationary waterfall particles per lens');
   const data=flow.data;
   for(let i=0;i<data.length;i+=4){
     assert(data[i+1]>=0&&data[i+1]<1);
@@ -109,15 +110,45 @@ try{
   };
   const bias=[0,.4,1.7,4.2].map(distribution);
   assert(bias.every(x=>x.ratio>4),'Flow must stay rim-dense, centre-sparse');
+  // Fixed emitter means the same particles keep identical angles as time
+  // advances; the fragment and vertex source contain no angular animation.
+  const source=require('node:fs').readFileSync(require('node:path').join(__dirname,'../lenses.js'),'utf8');
+  assert(source.includes('float angle=a_flow.x;'));
+  assert(!source.includes('float angle=a_flow.x+'));
   const phase=data[13],seed=data[14];
   const p0=1-Math.pow(phase,3.2);
   const p1=1-Math.pow((phase+.08*.24*(.88+.24*seed))%1,3.2);
   assert(p1<p0,'A particle advances inward');
   scheduled(performance.now()+16);
-  const draws=gl.draws.filter(d=>d.mode===gl.POINTS&&d.count===9600);
+  // Draw calls must receive the six independently controlled values, not
+  // just expose them in the HTML. The default single-cosine profile is 1/1.
+  const faceCalls=()=>gl.draws.filter(d=>d.mode===gl.TRIANGLES&&d.count===128*40*6);
+  assert.equal(faceCalls().length,6,'Two curved surfaces drawn for each of 3 lenses');
+  assert(faceCalls().every(d=>JSON.stringify(d.uniforms.u_profile)==='[1,1]'));
+  probe.setParams({bassProfileAmp:0,bassProfileWave:4,
+    midProfileAmp:.38,midProfileWave:2,highProfileAmp:.83,highProfileWave:1.5,
+    sideGoldWidth:1});
+  const start=gl.draws.length;
+  scheduled(performance.now()+28);
+  const changed=gl.draws.slice(start).filter(d=>d.mode===gl.TRIANGLES&&d.count===128*40*6);
+  assert.deepEqual(changed.map(d=>d.uniforms.u_profile),
+    [[0,4],[0,4],[.38,2],[.38,2],[.83,1.5],[.83,1.5]],
+    'Each lens has two faces sharing its own amplitude and wavelength');
+  assert(changed.every(d=>d.uniforms.u_sideGoldWidth===1),
+    '100% gold sidewall parameter reaches glass shader');
+  const waterfallProfile=gl.draws.slice(start).filter(d=>d.count===23040);
+  assert.deepEqual(waterfallProfile.map(d=>d.uniforms.u_profile),
+    [[0,4],[.38,2],[.83,1.5]],
+    'Internal flow must track the corresponding curved surface');
+  probe.setParams({bassProfileAmp:1,bassProfileWave:1,
+    midProfileAmp:1,midProfileWave:1,highProfileAmp:1,highProfileWave:1,
+    sideGoldWidth:.10});
+  gl.draws.length=0;
+  scheduled(performance.now()+44);
+  const draws=gl.draws.filter(d=>d.mode===gl.POINTS&&d.count===23040);
   assert.equal(draws.length,3,'All three lenses emit a waterfall');
   assert.deepEqual(draws.map(x=>x.uniforms.u_fade),[1,.58,.28]);
-  assert.equal(probe.metrics.waterfallCount,28800);
+  assert.equal(probe.metrics.waterfallCount,69120);
   const bounds=probe.metrics.lensExtentsY;
   assert.equal(bounds.length,3);
   assert(bounds.every(x=>x.convexY<x.upperCenterY&&x.upperCenterY<x.upperRimY));
@@ -129,11 +160,11 @@ try{
   const before=gl.draws.length;
   probe.setParams({waterfallDensity:0});
   scheduled(performance.now()+32);
-  assert.equal(gl.draws.slice(before).filter(x=>x.count===9600).length,0,
+  assert.equal(gl.draws.slice(before).filter(x=>x.count===23040).length,0,
     'Zero density disables waterfall draws');
   probe.destroy();
   console.log(JSON.stringify({meniscus:'passed',profile:'upper concave, lower convex',
-    waterfallPoints:28800,spatialDensity:bias,glass:{opacity:.26,frost:.12}}));
+    waterfallPoints:69120,spatialDensity:bias,glass:{opacity:.26,frost:.12}}));
 }finally{
   global.window=prevWindow;
   global.requestAnimationFrame=prevRAF;
