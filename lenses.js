@@ -1,4 +1,4 @@
-/* FluidGlow Audio: coaxial plano-convex lenses + spectral wavefronts. MIT.
+/* FluidGlow Audio: symmetric biconvex lenses + spectral wavefronts. MIT.
  * Dependency-free WebGL 1 / GLSL ES 1.00. Legacy FluidGlow remains vendored.
  */
 (function (root) {
@@ -17,6 +17,7 @@
     c: [.604, .380, .341], bg: [.031, .020, .027], mode: 1
   };
   const MAX_RIPPLES = 6, ANGLES = 576, LANES = 16;
+  const EDGE_RATIO = .12;
   const VERT = `
     attribute vec3 a_position, a_normal;
     uniform vec2 u_res, u_pan;
@@ -25,8 +26,8 @@
     varying vec3 v_normal, v_local, v_position;
     void main() {
       vec3 local = vec3(a_position.xy * u_radius, a_position.z * u_thickness);
-      // Scene +Y runs from the large lens to the small lens. The flat face
-      // is at depth, and the convex face extends toward scene -Y.
+      // Scene +Y runs from large to small. u_depth marks the symmetry
+      // plane: identical cosine-shaped caps extend along both +/-Y.
       vec3 world = u_diskX * local.x + u_diskZ * local.y + u_axisY * (u_depth - local.z);
       v_position = world;
       v_local = a_position;
@@ -148,44 +149,64 @@
       float blur=frost*(.14+.045*t/max(max(abs(r.x),abs(r.y)),abs(r.z)));
       return filteredStripes(distanceToLight,base,blur,1.4);
     }
-    // Exact one-bounce intersections with the same scaled spherical cap,
-    // flat disk and cylindrical sidewall used by the rasterized lens mesh.
+    // Approximate one-bounce intersections with two cosine caps and
+    // their thin cylindrical rim, consistent with the rasterized mesh.
     void keepHit(float t,vec3 normal,float kind,inout vec4 hit,inout float part) {
       if(t>.003&&t<hit.x){hit=vec4(t,normalize(normal));part=kind;}
     }
+    float capHalfRatio(float radius01) {
+      float u=clamp(radius01,0.0,1.0);
+      return .5*(.12+.88*.5*(1.0+cos(3.14159265*u)));
+    }
+    float faceResidual(vec3 point,float radius,float centerY,float thick,float side) {
+      return point.y-(centerY+side*thick*capHalfRatio(length(point.xz)/radius));
+    }
     void traceLens(vec3 p,vec3 d,vec3 lens,inout vec4 hit,inout float part,inout vec3 picked) {
-      float radius=lens.x,flatY=lens.y,thick=lens.z;
-      vec3 oc=p-vec3(0.0,flatY-thick*.5,0.0);
+      float radius=lens.x,centerY=lens.y,thick=lens.z;
+      vec3 oc=p-vec3(0.0,centerY,0.0);
       float bound=radius*radius+thick*thick*.25;
       float projection=dot(oc,d);
       if(projection*projection-dot(oc,oc)+bound<0.0)return;
       if(projection>0.0&&dot(oc,oc)>bound)return;
       float before=hit.x;
-      if(abs(d.y)>.0001){
-        float t=(flatY-p.y)/d.y;vec3 q=p+d*t;
-        if(dot(q.xz,q.xz)<=radius*radius)keepHit(t,vec3(0.0,1.0,0.0),1.0,hit,part);
-      }
-      const float sag=.38,edge=.20;
-      const float sphere=(1.0+sag*sag)/(2.0*sag),stretch=sag/(1.0-edge);
-      vec3 q=vec3(p.x/radius,((flatY-p.y)/thick-edge)*stretch+sphere-sag,p.z/radius);
-      vec3 v=vec3(d.x/radius,-d.y/thick*stretch,d.z/radius);
-      float a=dot(v,v),b=dot(q,v),c=dot(q,q)-sphere*sphere;
-      float disc=b*b-a*c;
-      if(disc>=0.0){
+      // Symmetric, narrow cylindrical edge (12% of maximum thickness).
+      float a=dot(d.xz,d.xz),b=dot(p.xz,d.xz);
+      float c=dot(p.xz,p.xz)-radius*radius,disc=b*b-a*c;
+      if(a>.000001&&disc>=0.0){
         float root=sqrt(disc);
         for(int k=0;k<2;k++){
-          float t=(-b+(k==0?-root:root))/a;vec3 h=q+v*t;
-          if(h.y>=sphere-sag-.0001&&dot(h.xz,h.xz)<=1.0001)
-            keepHit(t,vec3(h.x/radius,-h.y/thick*stretch,h.z/radius),0.0,hit,part);
+          float t=(-b+(k==0?-root:root))/a;
+          vec3 q=p+d*t;
+          if(abs(q.y-centerY)<=thick*.061)
+            keepHit(t,vec3(q.x,0.0,q.z),2.0,hit,part);
         }
       }
-      a=dot(d.xz,d.xz);b=dot(p.xz,d.xz);c=dot(p.xz,p.xz)-radius*radius;
-      disc=b*b-a*c;
-      if(a>.0001&&disc>=0.0){
-        float root=sqrt(disc);
-        for(int k=0;k<2;k++){
-          float t=(-b+(k==0?-root:root))/a;vec3 h=p+d*t;
-          if(h.y<=flatY&&h.y>=flatY-edge*thick)keepHit(t,vec3(h.x,0.0,h.z),2.0,hit,part);
+      // Each cap lies in a known slab. Eight bisected steps accurately
+      // recover the same cosine surface used by the visible geometry.
+      if(abs(d.y)>.0008){
+        for(int face=0;face<2;face++){
+          float side=face==0?-1.0:1.0;
+          float ta=(centerY+side*thick*.06-p.y)/d.y;
+          float tb=(centerY+side*thick*.5-p.y)/d.y;
+          float lo=max(.003,min(ta,tb)),hi=min(hit.x,max(ta,tb));
+          if(hi<=lo)continue;
+          float flo=faceResidual(p+d*lo,radius,centerY,thick,side);
+          float fhi=faceResidual(p+d*hi,radius,centerY,thick,side);
+          if(flo*fhi>0.0)continue;
+          for(int j=0;j<8;j++){
+            float mid=(lo+hi)*.5;
+            float value=faceResidual(p+d*mid,radius,centerY,thick,side);
+            if(flo*value<=0.0)hi=mid;
+            else{lo=mid;flo=value;}
+          }
+          float t=(lo+hi)*.5;
+          vec3 q=p+d*t;
+          float distanceXZ=length(q.xz),rho=distanceXZ/radius;
+          if(rho>1.001)continue;
+          float slope=(thick/radius)*.88*.785398163*sin(3.14159265*clamp(rho,0.0,1.0));
+          vec3 normal=vec3(q.x*slope/max(distanceXZ,.00001),side,
+            q.z*slope/max(distanceXZ,.00001));
+          keepHit(t,normal,float(face),hit,part);
         }
       }
       if(hit.x<before)picked=lens;
@@ -197,12 +218,12 @@
       if(abs(u_lensIndex-2.0)>.1)traceLens(p,d,u_lensData2,hit,part,picked);
       if(hit.x>999.0)return vec4(0.0);
       vec3 point=p+d*hit.x,n=hit.yzw;
-      vec2 bars=studioBarsLocal(point,reflect(d,n),1.0-step(.5,part));
+      vec2 bars=studioBarsLocal(point,reflect(d,n),1.0-step(1.5,part));
       float fr=.04+.96*pow(1.0-abs(dot(n,-d)),5.0);
       float rim=smoothstep(.89,.995,length(point.xz)/picked.x);
       vec3 color=u_paletteC*.07+(u_paletteB*bars.x*.85
         +mix(u_paletteA,vec3(1.0),.7)*bars.y*.95*u_whiteLight)*u_light+guideTint()*rim*.60*u_edgeGlow;
-      if(part<.5)color=mix(color,frostTint()*.32,u_convexFrost*.55);
+      if(part<1.5)color=mix(color,frostTint()*.32,u_convexFrost*.55);
       if(part>1.5)color=guideTint()*(.65+.35*fr)*u_edgeGlow;
       float coverage=(.14+.35*fr+.28*rim+.25*max(bars.x,bars.y))/(1.0+.10*hit.x*hit.x);
       // A distant lens cannot reappear at full brightness in another lens's mirror.
@@ -216,11 +237,11 @@
       if (dot(n,view) < 0.0) n = -n;
       float fresnel = pow(1.0 - abs(n.z), 3.0);
       vec3 p=sceneVector(v_position),ray=sceneVector(reflect(-view,n));
-      float convex=1.0-step(.5,u_surface),frost=convex*u_convexFrost;
-      // Blend over an angular interval around edge-on, never a sign test.
-      // The far cap retains its diffuse veil below; only its coherent studio
-      // lobe fades out, so hidden-surface filtering is not paid every frame.
-      float surfaceWeight=convex>.5 ? 1.0-u_faceMix : u_faceMix;
+      float convex=1.0-step(1.5,u_surface),frost=convex*u_convexFrost;
+      // Identical front/back materials. Face mix is only a symmetric,
+      // small edge-on softness control, never a one-sided flat mirror.
+      float symmetricFacing=abs(u_faceMix-.5)*2.0;
+      float surfaceWeight=.90+.10*symmetricFacing;
       vec2 bars=u_surface<1.5&&surfaceWeight>.001
         ? studioBarsLocal(p,ray,convex)*surfaceWeight : vec2(0.0);
       float warm = bars.x, cool = bars.y;
@@ -249,9 +270,9 @@
         float scatter=.25+.12*abs(n.z);
         col=mix(col,frostTint()*scatter,frost*.64);
         col+=frostTint()*grain*.035*frost;
-        alpha+=frost*(.22+.14*fresnel)*(.72+.28*(1.0-u_faceMix));
+        alpha+=frost*(.22+.14*fresnel)*(.90+.10*symmetricFacing);
       }
-      // Fresnel on the actual curved spherical cap, not a painted circular rim.
+      // Fresnel on both actual cosine-shaped curved surfaces.
       // Schlick's grazing response is broadened to remain visible on shallow,
       // frosted convex optics without overwhelming their diffuse veil.
       if(convex>.5&&u_convexFresnel>.001){
@@ -259,28 +280,28 @@
         float schlick=.04+.96*pow(1.0-ndv,5.0);
         float broad=pow(1.0-ndv,1.15);
         float capFr=mix(schlick,broad,.82);
-        float capVisibility=(.18+.82*(1.0-u_faceMix))*(1.0-.30*frost);
+        float capVisibility=(.90+.10*symmetricFacing)*(1.0-.30*frost);
         float capLight=u_convexFresnel*capFr*capVisibility;
         col+=mix(u_paletteB,u_paletteA,.82)*capLight*.90;
         alpha+=capLight*.23;
       }
-      // A micro-bevel gives the flat face an angularly varying normal only
-      // at its edge. Its Fresnel highlight travels around the rim on orbit.
-      if(u_surface>.5&&u_surface<1.5&&u_fresnelEdge>.001){
+      // Both lens faces have the same thin polished Fresnel rim.
+      if(u_surface<1.5&&u_fresnelEdge>.001){
         float rho=length(v_local.xy);
         float bevel=smoothstep(.955,1.0,rho);
         vec3 radial=normalize(u_diskX*v_local.x+u_diskZ*v_local.y+u_axisY*.00001);
-        vec3 bn=normalize(u_axisY*(1.0-.80*bevel)+radial*.85*bevel);
+        float side=u_surface<.5?-1.0:1.0;
+        vec3 bn=normalize(u_axisY*side*(1.0-.8*bevel)+radial*.85*bevel);
         float fr=.04+.96*pow(1.0-abs(dot(bn,view)),5.0);
-        float edge=smoothstep(.980,.994,rho);
-        float strength=u_fresnelEdge*edge*(.06+.94*fr)*(.12+.88*u_faceMix);
-        col+=mix(u_paletteA,vec3(1.0),.75)*strength*1.10;
-        alpha+=strength*.80;
+        float edge=smoothstep(.968,.998,rho);
+        float strength=u_fresnelEdge*edge*(.10+.90*fr);
+        col+=mix(u_paletteA,vec3(1.0),.72)*strength*.90;
+        alpha+=strength*.58;
       }
       // Guide light fills the cylindrical sidewall, brightest through its
       // thickness. Face boundaries no longer have separate glowing circles.
       if (u_surface > 1.5) {
-        float across = clamp(v_local.z/.20,0.0,1.0);
+        float across = clamp((v_local.z+.06)/.12,0.0,1.0);
         float guide = u_edgeGlow*(.55+.45*sin(across*3.14159265))*(.70+.30*fresnel);
         col = guideTint()*guide*(1.0+.16*u_energy);
         alpha = u_opacity*(.35+.40*guide);
@@ -385,31 +406,33 @@
       const b = gl.createBuffer(); buffers.push(b); gl.bindBuffer(gl.ARRAY_BUFFER, b);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); return b;
     }
-    // Plane at scene Y=0, convex cap at negative Y, and an actual cylindrical
-    // sidewall. The edge keeps 20% of the center thickness at all settings.
-    const segments = 128, rings = 32, cap = [], back = [], side = [];
-    const sag = .38, sphere = (1 + sag * sag) / (2 * sag), edge = .20;
-    function capVertex(r, a) {
-      const x = r * Math.cos(a), y = r * Math.sin(a);
-      const z = Math.sqrt(sphere * sphere - r * r);
-      return [x, y, (1 - edge) * (z - (sphere - sag)) / sag + edge,
-        x * (1 - edge) / sag, y * (1 - edge) / sag, z];
+    // Cosine-eased double-convex profile. At both the centre (r=0) and the
+    // edge (r=1) the slope is exactly zero; maximum slope is at r=.5.
+    const segments=128,rings=40,cap=[],back=[],side=[];
+    const edge=EDGE_RATIO;
+    function capVertex(r,a,sign){
+      const x=r*Math.cos(a),y=r*Math.sin(a);
+      const half=.5*(edge+.5*(1-edge)*(1+Math.cos(Math.PI*r)));
+      const slope=(1-edge)*Math.PI*.25*Math.sin(Math.PI*r);
+      const normalRadial=slope/Math.max(r,.00001);
+      return [x,y,sign*half,x*normalRadial,y*normalRadial,sign];
     }
-    for (let ring = 0; ring < rings; ring++) for (let j = 0; j < segments; j++) {
-      const a = j / segments * Math.PI * 2, b = (j + 1) / segments * Math.PI * 2;
-      const r0 = ring / rings, r1 = (ring + 1) / rings;
-      cap.push(...capVertex(r0, a), ...capVertex(r1, a), ...capVertex(r1, b),
-        ...capVertex(r0, a), ...capVertex(r1, b), ...capVertex(r0, b));
-      if (ring === 0) {
-        back.push(0, 0, 0, 0, 0, -1, Math.cos(a), Math.sin(a), 0, 0, 0, -1, Math.cos(b), Math.sin(b), 0, 0, 0, -1);
-        const sa = [Math.cos(a), Math.sin(a), 0, Math.cos(a), Math.sin(a), 0];
-        const sb = [Math.cos(b), Math.sin(b), 0, Math.cos(b), Math.sin(b), 0];
-        const sc = sa.slice(), sd = sb.slice(); sc[2] = edge; sd[2] = edge;
-        side.push(...sa, ...sc, ...sd, ...sa, ...sd, ...sb);
+    for(let ring=0;ring<rings;ring++)for(let j=0;j<segments;j++){
+      const a=j/segments*Math.PI*2,b=(j+1)/segments*Math.PI*2;
+      const r0=ring/rings,r1=(ring+1)/rings;
+      cap.push(...capVertex(r0,a,1),...capVertex(r1,a,1),...capVertex(r1,b,1),
+        ...capVertex(r0,a,1),...capVertex(r1,b,1),...capVertex(r0,b,1));
+      back.push(...capVertex(r0,a,-1),...capVertex(r1,b,-1),...capVertex(r1,a,-1),
+        ...capVertex(r0,a,-1),...capVertex(r0,b,-1),...capVertex(r1,b,-1));
+      if(ring===0){
+        const sa=[Math.cos(a),Math.sin(a),-edge*.5,Math.cos(a),Math.sin(a),0];
+        const sb=[Math.cos(b),Math.sin(b),-edge*.5,Math.cos(b),Math.sin(b),0];
+        const sc=sa.slice(),sd=sb.slice();sc[2]=edge*.5;sd[2]=edge*.5;
+        side.push(...sa,...sc,...sd,...sa,...sd,...sb);
       }
     }
-    const capBuffer = buffer(new Float32Array(cap)), backBuffer = buffer(new Float32Array(back)),
-      sideBuffer = buffer(new Float32Array(side));
+    const capBuffer=buffer(new Float32Array(cap)),backBuffer=buffer(new Float32Array(back)),
+      sideBuffer=buffer(new Float32Array(side));
     const ripples = Array.from({ length: MAX_RIPPLES }, () => ({
       buffer: buffer(new Float32Array(ANGLES * LANES * 5)),
       data: new Float32Array(ANGLES * LANES * 5), age: Infinity, life: 0
@@ -528,7 +551,7 @@
       if (reduce || !ripplesEnabled || !samples?.length || !(strength > 0)) return;
       const r = ripples.reduce((oldest, candidate) => candidate.age > oldest.age ? candidate : oldest);
       r.age = 0; r.bornAt=performance.now();r.strength = Math.max(.1, Math.min(1.4, strength));
-      r.depth = depths[0]-P.thickness*radii[0]*P.size;
+      r.depth = depths[0]-.5*P.thickness*radii[0]*P.size;
       r.radius = radii[0] * P.size;
       r.life = P.rippleLife; r.speed = P.rippleSpeed; r.drag=Math.max(0,P.rippleDrag); r.height = P.rippleHeight;
       r.growth = P.rippleGrowth; r.rise = P.rippleRise; r.maxSample = 0;
@@ -571,10 +594,11 @@
       // Bass motion is drum-only: sustained low-frequency level never moves
       // the large lens. Critical damping settles each impulse without jitter.
       depths[0] = (-.34 - springs[0].x*P.motionGain) * P.spread;
-      // Each NEXT convex face now reaches back toward -Y. Its own thickness
-      // sets the clearance from the previous lens's +Y-facing flat plane.
-      depths[1] = Math.max((.18 + (levels.mid*.07+springs[1].x)*P.motionGain*P.midMotion) * P.spread, depths[0] + P.thickness * .76 * P.size + .10);
-      depths[2] = Math.max((.60 + (levels.high*.10+springs[2].x)*P.motionGain*P.highMotion) * P.spread, depths[1] + P.thickness * .54 * P.size + .10);
+      // Each neighbour's convex apex must clear the previous rear apex.
+      depths[1]=Math.max((.18+(levels.mid*.07+springs[1].x)*P.motionGain*P.midMotion)*P.spread,
+        depths[0]+.5*P.thickness*P.size*(radii[0]+radii[1])+.10);
+      depths[2]=Math.max((.60+(levels.high*.10+springs[2].x)*P.motionGain*P.highMotion)*P.spread,
+        depths[1]+.5*P.thickness*P.size*(radii[1]+radii[2])+.10);
       const cr = Math.cos(P.rotation), sr = Math.sin(P.rotation), ct = Math.cos(P.incline), st = Math.sin(P.incline);
       rotateVector(basisU, cr, sr, 0); rotateVector(basisV, -sr * ct, cr * ct, st);
       rotateVector(axisY, sr * st, -cr * st, ct);
@@ -638,7 +662,10 @@
           faceMix:faceMix(),convexFrost:P.convexFrost,
           axisY: axisY.slice(), viewRotation: view.slice(), springDisplacement: springs.map(s => s.x),
           // All extents use the agreed scene Y coordinate, not screen Y.
-          lensExtentsY: depths.map((flatY, i) => ({ flatY, convexY: flatY - P.thickness * radii[i] * P.size })),
+          lensExtentsY: depths.map((centerY,i)=>({centerY,
+             flatY:centerY+.5*P.thickness*radii[i]*P.size,
+             convexY:centerY-.5*P.thickness*radii[i]*P.size,
+             backY:centerY+.5*P.thickness*radii[i]*P.size})),
           rippleProfiles: active.map(r => {
             const travel = rippleDistance(r), lift = travel * r.rise;
             const expansionSpeed=r.drag<.001 ? r.speed : r.speed*r.drag*Math.exp(-r.drag*r.age/r.life)/(-Math.expm1(-r.drag));
