@@ -25,7 +25,7 @@ let browser,server;
     const canvas=document.createElement('canvas');
     canvas.style.cssText='position:fixed;left:0;top:0;width:360px;height:360px;z-index:99';document.body.append(canvas);
     const probe=LensRenderer({canvas,maxDpr:1,edgeGlow:0,fresnelEdge:0,interReflection:0,reflection:1,posY:0,
-      palette:{bg:[0,0,0]}});
+      sideGoldWidth:0,palette:{bg:[0,0,0]}});
     const gl=canvas.getContext('webgl'),draw=gl.drawArrays.bind(gl),clear=gl.clear.bind(gl);
     let mode='flat',seen=false,lastParticle=null;
     gl.clear=(...args)=>{seen=false;clear(...args)};
