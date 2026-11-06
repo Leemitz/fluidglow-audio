@@ -6,7 +6,7 @@
   const DEFAULTS = Object.freeze({
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50,
     bassProfileAmp: 1, bassProfileWave: 1, midProfileAmp: 1, midProfileWave: 1,
-    highProfileAmp: 1, highProfileWave: 1, sideGoldWidth: 0, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
+    highProfileAmp: 1, highProfileWave: 1, sideGoldWidth: .10, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
     reflection: .72, opacity: .26, glow: 1.30, whiteLight: .60, aura: .20, roughness: .10, edgeGlow: 1.05,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
     convexFrost: .12, faceTransition: 18, waterfallDensity: 1.70, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
