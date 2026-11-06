@@ -384,13 +384,26 @@
         col+=mix(u_paletteA,vec3(1.0),.72)*strength*.90;
         alpha+=strength*.58;
       }
-      // Guide light fills the cylindrical sidewall, brightest through its
-      // thickness. Face boundaries no longer have separate glowing circles.
+      // Sidewall UV runs 0 -> 1 from LOWER to UPPER surface.
+      // Two very narrow gold-plated bands grow inward from both rims.
+      // width=0 retains completely unchanged clear glass; width=1 coats all.
       if (u_surface > 1.5) {
-        float across=clamp((-v_local.z-.53)/.24,0.0,1.0);
-        float guide = u_edgeGlow*(.55+.45*sin(across*3.14159265))*(.70+.30*fresnel);
+        float across=clamp(v_local.z,0.0,1.0);
+        float guide=u_edgeGlow*(.55+.45*sin(across*3.14159265))*(.70+.30*fresnel);
         col=mix(vec3(1.0),guideTint(),.22)*guide*.75*(1.0+.12*u_energy);
         alpha=u_opacity*(.035+.16*guide);
+        if(u_surface<2.5){
+          float width=clamp(u_sideGoldWidth,0.0,1.0);
+          float halfWidth=.5*width;
+          float distanceToRim=min(across,1.0-across);
+          float gilded=(1.0-smoothstep(max(0.0,halfWidth-.012),
+            halfWidth+.012,distanceToRim))*smoothstep(.0,.01,width);
+          gilded=mix(gilded,1.0,smoothstep(.98,1.0,width));
+          vec3 gold=mix(u_paletteB,u_paletteA,.66)*
+            (.72+.24*fresnel+.32*max(warm,cool));
+          col=mix(col,gold*u_glow,gilded);
+          alpha=mix(alpha,.64+.20*fresnel,gilded);
+        }
       }
       if (u_surface > 2.5) {
         alpha = (u_surface < 3.5 ? .025 : .012)*u_edgeGlow;
@@ -565,9 +578,11 @@
       back.push(...capVertex(r0,a,1),...capVertex(r1,b,1),...capVertex(r1,a,1),
         ...capVertex(r0,a,1),...capVertex(r0,b,1),...capVertex(r1,b,1));
       if(ring===0){
-        const sa=[Math.cos(a),Math.sin(a),-LOWER_RIM,Math.cos(a),Math.sin(a),0];
-        const sb=[Math.cos(b),Math.sin(b),-LOWER_RIM,Math.cos(b),Math.sin(b),0];
-        const sc=sa.slice(),sd=sb.slice();sc[2]=-UPPER_RIM;sd[2]=-UPPER_RIM;
+        // Mesh sidewall's third component is now thickness UV (0..1).
+        // The vertex shader resolves its actual Y endpoints per lens.
+        const sa=[Math.cos(a),Math.sin(a),0,Math.cos(a),Math.sin(a),0];
+        const sb=[Math.cos(b),Math.sin(b),0,Math.cos(b),Math.sin(b),0];
+        const sc=sa.slice(),sd=sb.slice();sc[2]=1;sd[2]=1;
         side.push(...sa,...sc,...sd,...sa,...sd,...sb);
       }
     }
@@ -605,6 +620,12 @@
       });
     }
     const depths = [0, 0, 0], radii = [1, .76, .54];
+    const profileKeys=[['bassProfileAmp','bassProfileWave'],
+      ['midProfileAmp','midProfileWave'],['highProfileAmp','highProfileWave']];
+    function profileAt(i){
+      const [amp,wave]=profileKeys[i];
+      return [Math.max(0,Math.min(1,P[amp])),Math.max(1,Math.min(4,P[wave]))];
+    }
     let ripplesEnabled = true;
     const currentPalette = copyPalette(options.palette || INITIAL_PALETTE);
     let targetPalette = copyPalette(currentPalette);
@@ -750,11 +771,14 @@
       // Bass motion is drum-only: sustained low-frequency level never moves
       // the large lens. Critical damping settles each impulse without jitter.
       depths[0] = (-.34 - springs[0].x*P.motionGain) * P.spread;
-      // Highest upper rim of one lens clears the lowest convex apex of next.
+      // Amplitude changes the upper rim; wavelengths preserve rim height
+      // by using a normalized cosine segment. Keep the lenses separated.
+      const upperRim0=.50+.27*profileAt(0)[0];
+      const upperRim1=.50+.27*profileAt(1)[0];
       depths[1]=Math.max((.18+(levels.mid*.07+springs[1].x)*P.motionGain*P.midMotion)*P.spread,
-        depths[0]+P.thickness*P.size*(UPPER_RIM*radii[0]-LOWER_CENTER*radii[1])+.10);
+        depths[0]+P.thickness*P.size*(upperRim0*radii[0]-LOWER_CENTER*radii[1])+.10);
       depths[2]=Math.max((.60+(levels.high*.10+springs[2].x)*P.motionGain*P.highMotion)*P.spread,
-        depths[1]+P.thickness*P.size*(UPPER_RIM*radii[1]-LOWER_CENTER*radii[2])+.10);
+        depths[1]+P.thickness*P.size*(upperRim1*radii[1]-LOWER_CENTER*radii[2])+.10);
       const cr = Math.cos(P.rotation), sr = Math.sin(P.rotation), ct = Math.cos(P.incline), st = Math.sin(P.incline);
       rotateVector(basisU, cr, sr, 0); rotateVector(basisV, -sr * ct, cr * ct, st);
       rotateVector(axisY, sr * st, -cr * st, ct);
@@ -776,14 +800,18 @@
       }
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       common(lensProgram); f(lensProgram, 'time', time); f(lensProgram, 'paletteMode', currentPalette.mode);
-      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost', 'finiteBands', 'outerDecay']) f(lensProgram, name, P[name]);
+      for (const name of ['reflection', 'opacity', 'roughness', 'sat', 'light', 'whiteLight', 'gamma', 'surfaceMotion', 'bandWidth', 'bandSpacing', 'bandOffset', 'edgeGlow', 'interReflection', 'fresnelEdge', 'convexFresnel', 'midFade', 'highFade', 'edgeSat', 'lightLayout', 'convexFrost', 'finiteBands', 'outerDecay', 'sideGoldWidth']) f(lensProgram, name, P[name]);
       f(lensProgram,'faceMix',faceMix());
-      for(let i=0;i<3;i++)gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
+      for(let i=0;i<3;i++){
+        gl.uniform3f(location(lensProgram,'lensData'+i),radii[i]*P.size,depths[i],P.thickness*radii[i]*P.size);
+        gl.uniform2f(location(lensProgram,'profile'+i),...profileAt(i));
+      }
       // Orbit can pass behind the lenses. Re-sort their two curved faces
       // and transparent sidewall when the view crosses the disk plane.
       const order = axisY[2] >= 0 ? [0, 1, 2] : [2, 1, 0];
       for (const i of order) {
         f(lensProgram,'lensIndex',i);
+        gl.uniform2f(location(lensProgram,'profile'),...profileAt(i));
         f(lensProgram,'lensFade',i===0?1.0:i===1?P.midFade:P.highFade);
         f(lensProgram, 'radius', radii[i] * P.size); f(lensProgram, 'depth', depths[i]);
         f(lensProgram, 'thickness', P.thickness * radii[i] * P.size);
@@ -814,6 +842,7 @@
         gl.bindBuffer(gl.ARRAY_BUFFER,waterfallBuffer);
         attribute(waterfallProgram,'a_flow',4,16,0);
         for(let i=0;i<3;i++){
+          gl.uniform2f(location(waterfallProgram,'profile'),...profileAt(i));
           f(waterfallProgram,'radius',radii[i]*P.size);
           f(waterfallProgram,'depth',depths[i]);
           f(waterfallProgram,'thickness',P.thickness*radii[i]*P.size);
@@ -843,11 +872,14 @@
           // All extents use the agreed scene Y coordinate, not screen Y.
           lensExtentsY: depths.map((centerY,i)=>{
             const thick=P.thickness*radii[i]*P.size;
+            const amplitude=profileAt(i)[0];
+            const lowerRim=LOWER_CENTER+1.03*amplitude;
+            const upperRim=UPPER_CENTER+.27*amplitude;
             return {centerY,convexY:centerY+LOWER_CENTER*thick,
-              lowerRimY:centerY+LOWER_RIM*thick,
+              lowerRimY:centerY+lowerRim*thick,
               upperCenterY:centerY+UPPER_CENTER*thick,
-              upperRimY:centerY+UPPER_RIM*thick,
-              backY:centerY+UPPER_RIM*thick,flatY:centerY+UPPER_RIM*thick};
+              upperRimY:centerY+upperRim*thick,
+              backY:centerY+upperRim*thick,flatY:centerY+upperRim*thick};
           }),
           rippleProfiles: active.map(r => {
             const travel = rippleDistance(r), lift = travel * r.rise;
