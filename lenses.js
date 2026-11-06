@@ -17,7 +17,7 @@
     c: [.604, .380, .341], bg: [.031, .020, .027], mode: 1
   };
   const MAX_RIPPLES = 6, ANGLES = 576, LANES = 16;
-  const FLOW_STREAMS=160,FLOW_DROPS=24,FLOW_POINTS=FLOW_STREAMS*FLOW_DROPS;
+  const FLOW_STREAMS=240,FLOW_DROPS=40,FLOW_POINTS=FLOW_STREAMS*FLOW_DROPS;
   // Y coordinates per unit of the lens's central thickness.
   const LOWER_CENTER=-.50, LOWER_RIM=.53, UPPER_CENTER=.50, UPPER_RIM=.77;
   const VERT = `
@@ -412,25 +412,31 @@
     varying float v_alpha, v_seed, v_rim;
     void main() {
       float seed=a_flow.z;
-      float phase=fract(a_flow.y+u_time*u_speed*(.78+.44*seed));
+      // Uniform travel time, but NON-uniform radial distance: slower near
+      // the rim, faster toward the centre. Edge-heavy density persists at
+      // EVERY time, not just when the points were initialized.
+      float cycle=fract(a_flow.y+u_time*u_speed*(.88+.24*seed));
+      float phase=pow(cycle,3.2);
       float r=1.0-phase;
-      // A narrow radial waterfall stream, slightly curving as it nears
-      // the center; each particle always moves from rim toward the center.
-      float angle=a_flow.x+.065*sin(phase*8.0+seed*21.0)*(1.0-r);
-      float capHalf=.5*(.12+.88*.5*(1.0+cos(3.14159265*r)));
-      float inside=(a_flow.w*2.0-1.0)*.78;
+      float angle=a_flow.x+.042*sin(phase*8.0+seed*21.0)*(1.0-r);
+      // Place each point strictly BETWEEN the +Y concavity and -Y convexity.
+      float easing=.5-.5*cos(3.14159265*r);
+      float lower=-.50+1.03*easing;
+      float upper=.50+.27*easing;
+      float inside=clamp(.5+(a_flow.w*2.0-1.0)*.36,.12,.88);
+      float height=mix(lower,upper,inside);
       vec3 world=(u_diskX*cos(angle)+u_diskZ*sin(angle))*(u_radius*r)
-        +u_axisY*(u_depth+u_thickness*capHalf*inside);
+        +u_axisY*(u_depth+u_thickness*height);
       vec2 p=(world.xy+u_pan)*u_zoom;
       gl_Position=vec4(p*min(u_res.x,u_res.y)/u_res,-world.z*.12,1.0);
-      float rim=smoothstep(.69,.985,r);
-      float centerFade=smoothstep(.09,.33,r);
-      float endFade=smoothstep(0.0,.10,phase)*(1.0-smoothstep(.87,1.0,phase));
-      float shimmer=.65+.35*sin(seed*187.0+u_time*3.0);
-      v_alpha=u_density*u_fade*centerFade*endFade*(.12+.86*rim)
-        *(.38+.62*seed)*(.75+.25*shimmer)*(1.0+.55*u_audio);
+      float rim=smoothstep(.57,.95,r);
+      float radialFade=pow(r,1.65)*smoothstep(.04,.22,r);
+      float endFade=smoothstep(.0,.015,cycle)*(1.0-smoothstep(.98,1.0,cycle));
+      float shimmer=.70+.30*sin(seed*187.0+u_time*2.5);
+      v_alpha=u_density*u_fade*radialFade*endFade*(.25+.75*rim)
+        *(.40+.60*seed)*(.80+.20*shimmer)*(1.0+.40*u_audio);
       v_seed=seed;v_rim=rim;
-      gl_PointSize=(.95+1.50*seed+rim*.38)*u_dpr;
+      gl_PointSize=(.85+1.6*seed)*(.40+.75*pow(r,.7))*u_dpr;
     }`;
   const FALL_FRAG = `
     precision mediump float;
@@ -530,7 +536,8 @@
     }
     const capBuffer=buffer(new Float32Array(cap)),backBuffer=buffer(new Float32Array(back)),
       sideBuffer=buffer(new Float32Array(side));
-    // Keep the existing inward waterfall cloud; updated in the next pass.
+    // 240 radial streams x 40 points: 9,600 grains per lens. The nonlinear
+    // travel mapping makes the edge denser at every animation instant.
     const flowData=new Float32Array(FLOW_POINTS*4);
     for(let stream=0;stream<FLOW_STREAMS;stream++){
       const jitter=((stream*73)%173)/173-.5;
