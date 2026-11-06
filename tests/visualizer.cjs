@@ -153,7 +153,9 @@ let browser, server;
   for(const band of ['bass','mid','high']){
     assert.equal(await page.locator('[data-param="'+band+'ProfileAmp"]').inputValue(),'1');
     assert.equal(await page.locator('[data-param="'+band+'ProfileWave"]').inputValue(),'1');
+    assert.equal(await page.locator('[data-param="'+band+'Thickness"]').inputValue(),'1');
   }
+  assert.equal(await page.locator('#fluid-output-bassThickness').textContent(),'1.00×');
   assert.equal(await page.locator('[data-param="sideGoldWidth"]').inputValue(),'0.1');
   assert.equal(await page.locator('#fluid-output-sideGoldWidth').textContent(),'10%');
   for(const [name,value] of [['bassProfileAmp',0],['midProfileAmp',.38],
@@ -163,6 +165,7 @@ let browser, server;
     },value);
   }
   await page.waitForTimeout(100);
+  const shapeBefore=await page.evaluate(()=>__lens.metrics.lensExtentsY);
   const changedProfiles=await page.evaluate(()=>__lens.params);
   assert.equal(changedProfiles.bassProfileAmp,0);
   assert.equal(changedProfiles.midProfileAmp,.38);
@@ -170,6 +173,25 @@ let browser, server;
   assert.equal(changedProfiles.bassProfileWave,1);
   assert.equal(changedProfiles.sideGoldWidth,1);
   assert.equal(await page.locator('#fluid-output-sideGoldWidth').textContent(),'100%');
+  // Shape changes alone preserve the exact same front/back face positions
+  // at the center and rim, regardless of amp and wavelength.
+  const shapeAfter=await page.evaluate(()=>__lens.metrics.lensExtentsY);
+  for(let i=0;i<3;i++)for(const field of
+      ['centerY','convexY','upperCenterY','lowerRimY','upperRimY']){
+    assert(Math.abs(shapeAfter[i][field]-shapeBefore[i][field])<.00001,
+      'Curvature controls must not alter lens thickness: '+field);
+  }
+  await page.locator('[data-param="midThickness"]').evaluate(el=>{
+    el.value='1.4';el.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await page.waitForTimeout(100);
+  const expanded=await page.evaluate(()=>__lens.metrics.lensExtentsY[1]);
+  assert(Math.abs((expanded.upperCenterY-expanded.convexY)-.5*.76*1.4)<.00001,
+    'Dedicated mid lens thickness multiplier must change face separation');
+  assert.equal(await page.locator('#fluid-output-midThickness').textContent(),'1.40×');
+  await page.locator('[data-param="midThickness"]').evaluate(el=>{
+    el.value='1';el.dispatchEvent(new Event('input',{bubbles:true}));
+  });
   for(const [name,value] of [['bassProfileAmp',1],['midProfileAmp',1],
     ['highProfileWave',1],['sideGoldWidth',.1]]){
     await page.locator('[data-param="'+name+'"]').evaluate((el,val)=>{
