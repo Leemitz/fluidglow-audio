@@ -7,7 +7,7 @@
     size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
     reflection: .5, opacity: .48, glow: 1.35, whiteLight: .55, aura: .20, roughness: .13, edgeGlow: 1.25,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
-    convexFrost: .78, faceTransition: 18, midMotion: 2.0, highMotion: 2.25,
+    convexFrost: .78, faceTransition: 18, waterfallDensity: .85, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
     sat: 1.05, light: 1, gamma: 1.15, speed: .24, surfaceMotion: 0,
     rippleSpeed: .78, rippleLife: 3.4, rippleDrag: 3, rippleHeight: .78, rippleGrowth: .80, rippleRise: .20,
     zoom: 1, posX: 0, posY: .08, motionGain: .70
@@ -17,6 +17,7 @@
     c: [.604, .380, .341], bg: [.031, .020, .027], mode: 1
   };
   const MAX_RIPPLES = 6, ANGLES = 576, LANES = 16;
+  const FLOW_STREAMS=160,FLOW_DROPS=24,FLOW_POINTS=FLOW_STREAMS*FLOW_DROPS;
   const EDGE_RATIO = .12;
   const VERT = `
     attribute vec3 a_position, a_normal;
@@ -353,6 +354,48 @@
       float alpha = (1.0 - smoothstep(.12, 1.0, d)) * v_alpha;
       gl_FragColor = vec4(mix(u_paletteB, u_paletteA, v_seed * .35) * (1.03 + u_aura * .25), alpha*.78);
     }`;
+
+  const FALL_VERT = `
+    attribute vec4 a_flow;
+    uniform vec2 u_res, u_pan;
+    uniform vec3 u_diskX, u_diskZ, u_axisY;
+    uniform float u_zoom, u_time, u_speed, u_radius, u_depth,
+      u_thickness, u_density, u_audio, u_fade, u_dpr;
+    varying float v_alpha, v_seed, v_rim;
+    void main() {
+      float seed=a_flow.z;
+      float phase=fract(a_flow.y+u_time*u_speed*(.78+.44*seed));
+      float r=1.0-phase;
+      // A narrow radial waterfall stream, slightly curving as it nears
+      // the center; each particle always moves from rim toward the center.
+      float angle=a_flow.x+.065*sin(phase*8.0+seed*21.0)*(1.0-r);
+      float capHalf=.5*(.12+.88*.5*(1.0+cos(3.14159265*r)));
+      float inside=(a_flow.w*2.0-1.0)*.78;
+      vec3 world=(u_diskX*cos(angle)+u_diskZ*sin(angle))*(u_radius*r)
+        +u_axisY*(u_depth+u_thickness*capHalf*inside);
+      vec2 p=(world.xy+u_pan)*u_zoom;
+      gl_Position=vec4(p*min(u_res.x,u_res.y)/u_res,-world.z*.12,1.0);
+      float rim=smoothstep(.69,.985,r);
+      float centerFade=smoothstep(.09,.33,r);
+      float endFade=smoothstep(0.0,.10,phase)*(1.0-smoothstep(.87,1.0,phase));
+      float shimmer=.65+.35*sin(seed*187.0+u_time*3.0);
+      v_alpha=u_density*u_fade*centerFade*endFade*(.12+.86*rim)
+        *(.38+.62*seed)*(.75+.25*shimmer)*(1.0+.55*u_audio);
+      v_seed=seed;v_rim=rim;
+      gl_PointSize=(.95+1.50*seed+rim*.38)*u_dpr;
+    }`;
+  const FALL_FRAG = `
+    precision mediump float;
+    uniform vec3 u_paletteA,u_paletteB;
+    uniform float u_glow;
+    varying float v_alpha,v_seed,v_rim;
+    void main() {
+      float distanceFromCenter=length(gl_PointCoord-vec2(.5))*2.0;
+      float soft=1.0-smoothstep(.18,1.0,distanceFromCenter);
+      vec3 metal=mix(u_paletteB,u_paletteA,.30+.65*v_seed);
+      vec3 color=mix(metal,mix(u_paletteA,vec3(1.0),.68),v_rim*.33);
+      gl_FragColor=vec4(color*(.65+.40*u_glow),soft*v_alpha*.63);
+    }`;
   function copyPalette(value) {
     const result = {};
     for (const k of ['a', 'b', 'c', 'bg']) result[k] = (value[k] || INITIAL_PALETTE[k]).slice();
@@ -391,11 +434,12 @@
       finally { shaders.forEach(s => gl.deleteShader(s)); }
       programs.push(p); return { handle: p, uniforms: {}, attributes: {} };
     }
-    let lensProgram, particleProgram;
+    let lensProgram, particleProgram, waterfallProgram;
     try {
       const highp=gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER,gl.HIGH_FLOAT);
       lensProgram=program(VERT,highp&&highp.precision?FRAG:FRAG.replace('precision highp float','precision mediump float'));
       particleProgram=program(PARTICLE_VERT,PARTICLE_FRAG);
+      waterfallProgram=program(FALL_VERT,FALL_FRAG);
     }
     catch (error) {
       programs.forEach(p => gl.deleteProgram(p));
@@ -433,6 +477,22 @@
     }
     const capBuffer=buffer(new Float32Array(cap)),backBuffer=buffer(new Float32Array(back)),
       sideBuffer=buffer(new Float32Array(side));
+    // Reusable 3840-point cloud: 160 inwards rays by 24 staggered drops.
+    // Each point keeps a stable radial stream and layers within the lens.
+    const flowData=new Float32Array(FLOW_POINTS*4);
+    for(let stream=0;stream<FLOW_STREAMS;stream++){
+      const jitter=((stream*73)%173)/173-.5;
+      const angle=2*Math.PI*(stream+jitter*.55)/FLOW_STREAMS;
+      const seed=((stream*61)%167)/167;
+      for(let drop=0;drop<FLOW_DROPS;drop++){
+        const index=(stream*FLOW_DROPS+drop)*4;
+        const phase=(drop+.5)/FLOW_DROPS+(seed-.5)*.02;
+        flowData[index]=angle;flowData[index+1]=phase;
+        flowData[index+2]=((stream*31+drop*83)%251)/251;
+        flowData[index+3]=((stream*43+drop*29)%263)/263;
+      }
+    }
+    const waterfallBuffer=buffer(flowData);
     const ripples = Array.from({ length: MAX_RIPPLES }, () => ({
       buffer: buffer(new Float32Array(ANGLES * LANES * 5)),
       data: new Float32Array(ANGLES * LANES * 5), age: Infinity, life: 0
@@ -453,7 +513,7 @@
     const currentPalette = copyPalette(options.palette || INITIAL_PALETTE);
     let targetPalette = copyPalette(currentPalette);
     const media = window.matchMedia('(prefers-reduced-motion:reduce)');
-    let reduce = media.matches, dpr = 1, alive = true, raf, last = performance.now(), time = 0;
+    let reduce = media.matches, dpr = 1, alive = true, raf, last = performance.now(), time = 0, waterfallTime=0;
     const basisU = [1, 0, 0], basisV = [0, 1, 0], axisY = [0, 0, 1];
     function faceMix() {
       const width=Math.sin(Math.max(1,Math.min(45,P.faceTransition))*Math.PI/180);
@@ -574,7 +634,7 @@
     function frame(now) {
       if (!alive) return;
       const wallDt=Math.max(0,(now-last)/1000),dt=Math.min(wallDt,.10);last=now;
-      if (!reduce) time += dt * P.speed;
+      if (!reduce) { time += dt * P.speed; waterfallTime += dt; }
       const ease = 1 - Math.exp(-dt / .4);
       for (const key of ['a', 'b', 'c', 'bg']) for (let ch = 0; ch < 3; ch++)
         currentPalette[key][ch] += (targetPalette[key][ch] - currentPalette[key][ch]) * ease;
@@ -645,6 +705,28 @@
         mesh(sideBuffer,side.length/6,gl.TRIANGLES);
         gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
       }
+      // Render the waterfall after the glass so the dust glimmers visibly
+      // through the translucent caps. Positions stay inside both surfaces.
+      if(!reduce&&P.waterfallDensity>.001){
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE);
+        common(waterfallProgram);
+        f(waterfallProgram,'time',waterfallTime);
+        f(waterfallProgram,'speed',P.waterfallSpeed);
+        f(waterfallProgram,'density',P.waterfallDensity);
+        f(waterfallProgram,'glow',P.waterfallGlow);
+        f(waterfallProgram,'dpr',dpr);
+        gl.bindBuffer(gl.ARRAY_BUFFER,waterfallBuffer);
+        attribute(waterfallProgram,'a_flow',4,16,0);
+        for(let i=0;i<3;i++){
+          f(waterfallProgram,'radius',radii[i]*P.size);
+          f(waterfallProgram,'depth',depths[i]);
+          f(waterfallProgram,'thickness',P.thickness*radii[i]*P.size);
+          f(waterfallProgram,'fade',i===0?1.0:i===1?P.midFade:P.highFade);
+          f(waterfallProgram,'audio',i===0?springs[0].energy:levels[['bass','mid','high'][i]]);
+          gl.drawArrays(gl.POINTS,0,FLOW_POINTS);
+        }
+        gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+      }
       raf = requestAnimationFrame(frame);
     }
     raf = requestAnimationFrame(frame);
@@ -660,6 +742,7 @@
         return { depths: depths.slice(), radii: radii.map(r => r * P.size),
           particlesPerRipple:ANGLES*LANES,sideSaturation:P.edgeSat,lightLayout:P.lightLayout,
           faceMix:faceMix(),convexFrost:P.convexFrost,
+           waterfallCount:FLOW_POINTS*3,waterfallSpeed:P.waterfallSpeed,
           axisY: axisY.slice(), viewRotation: view.slice(), springDisplacement: springs.map(s => s.x),
           // All extents use the agreed scene Y coordinate, not screen Y.
           lensExtentsY: depths.map((centerY,i)=>({centerY,
