@@ -14,7 +14,7 @@ const gl={
   LINK_STATUS:35714,FRAGMENT_SHADER_PRECISION:1,HIGH_FLOAT:36338,
   COLOR_BUFFER_BIT:16384,DEPTH_TEST:2929,BLEND:3042,SRC_ALPHA:770,ONE:1,
   ONE_MINUS_SRC_ALPHA:771,
-  buffers:[],draws:[],bound:null,program:null,
+  buffers:[],draws:[],bound:null,program:null,blendEnabled:false,
   createProgram(){return {uniforms:{}}},createShader(){return {}},
   shaderSource(){},compileShader(){},getShaderParameter(){return true},
   attachShader(){},linkProgram(){},getProgramParameter(){return true},
@@ -30,9 +30,10 @@ const gl={
   uniform1f(loc,v){loc.program.uniforms[loc.name]=v},
   uniform2f(loc,a,b){loc.program.uniforms[loc.name]=[a,b]},uniform3f(){},uniform3fv(){},
   disableVertexAttribArray(){},enableVertexAttribArray(){},vertexAttribPointer(){},
-  viewport(){},clearColor(){},clear(){},disable(){},enable(){},blendFunc(){},
+  viewport(){},clearColor(){},clear(){},disable(x){if(x===this.BLEND)this.blendEnabled=false},
+  enable(x){if(x===this.BLEND)this.blendEnabled=true},blendFunc(){},
   drawArrays(mode,start,count){
-    this.draws.push({mode,count,uniforms:{...this.program.uniforms}});
+    this.draws.push({mode,count,blending:this.blendEnabled,uniforms:{...this.program.uniforms}});
   }
 };
 const canvas={clientWidth:700,clientHeight:560,classList:{add(){},remove(){}},
@@ -49,6 +50,8 @@ try{
   assert.equal(probe.params.opacity,.26);
   assert.equal(probe.params.waterfallDensity,1.70);
   assert.equal(probe.params.sideGoldWidth,.10);
+  for(const key of ['bassThickness','midThickness','highThickness'])
+    assert.equal(probe.params[key],1,'Independent thickness defaults to 1x');
 
   const faceLength=128*40*6*6;
   const faces=gl.buffers.filter(b=>b.data.length===faceLength);
@@ -119,6 +122,33 @@ try{
   const p0=1-Math.pow(phase,3.2);
   const p1=1-Math.pow((phase+.08*.24*(.88+.24*seed))%1,3.2);
   assert(p1<p0,'A particle advances inward');
+  // The shape is a common-mode offset: it cannot alter the local
+  // separation between surfaces at ANY radius, nor either endpoint.
+  const shape=(r,amp,wave)=>{
+    const k=Math.PI/wave,normalized=(1-Math.cos(k*r))/(1-Math.cos(k));
+    const base=.5-.5*Math.cos(Math.PI*r);
+    const middle=.65*((1-amp)*r+amp*normalized);
+    const gap=1-.76*base;
+    return {low:middle-gap*.5,high:middle+gap*.5,gap};
+  };
+  for(const r of [0,.12,.37,.5,.73,.91,1]){
+    const baseline=shape(r,1,1);
+    for(const amp of [0,.25,.65,1])for(const wave of [1,1.5,2,4]){
+      const next=shape(r,amp,wave);
+      close(next.high-next.low,baseline.gap,1e-10);
+      if(r===0||r===1){
+        close(next.low,baseline.low,1e-10);
+        close(next.high,baseline.high,1e-10);
+      }
+    }
+  }
+  assert(Math.abs(shape(.4,0,1).low-shape(.4,1,1).low)>.01,
+    'Amplitude must still visibly alter the profile');
+  assert(source.includes('float middle=.65*mix(rho,waveShape,amp);'));
+  assert(source.includes('float gap=1.0-.76*baseShape;'));
+  assert(source.includes('float lower=middle-.5*gap;'));
+  assert(source.includes('float upper=middle+.5*gap;'));
+
   scheduled(performance.now()+16);
   // Draw calls must receive the six independently controlled values, not
   // just expose them in the HTML. The default single-cosine profile is 1/1.
@@ -128,21 +158,52 @@ try{
   probe.setParams({bassProfileAmp:0,bassProfileWave:4,
     midProfileAmp:.38,midProfileWave:2,highProfileAmp:.83,highProfileWave:1.5,
     sideGoldWidth:1});
+  const beforeShape=probe.metrics.lensExtentsY.map(x=>({...x}));
+  const initialFaceThickness=faceCalls().map(x=>x.uniforms.u_thickness);
   const start=gl.draws.length;
   scheduled(performance.now()+28);
+  const afterShape=probe.metrics.lensExtentsY;
+  for(let i=0;i<3;i++){
+    for(const key of ['centerY','convexY','upperCenterY','lowerRimY','upperRimY'])
+      close(afterShape[i][key],beforeShape[i][key],1e-7);
+  }
   const changed=gl.draws.slice(start).filter(d=>d.mode===gl.TRIANGLES&&d.count===128*40*6);
   assert.deepEqual(changed.map(d=>d.uniforms.u_profile),
     [[0,4],[0,4],[.38,2],[.38,2],[.83,1.5],[.83,1.5]],
     'Each lens has two faces sharing its own amplitude and wavelength');
   assert(changed.every(d=>d.uniforms.u_sideGoldWidth===1),
     '100% gold sidewall parameter reaches glass shader');
+  assert.deepEqual(changed.map(x=>x.uniforms.u_thickness),initialFaceThickness,
+    'Changing amplitude/wavelength must not change actual thickness');
+  const opaqueGold=gl.draws.slice(start).filter(d=>d.uniforms.u_surface===5);
+  assert.equal(opaqueGold.length,3,'Three separate gold sidewall draws');
+  assert(opaqueGold.every(d=>!d.blending),
+    'Metal must render without alpha blending');
+  assert(source.includes('gl_FragColor=vec4(pow(max(metal*u_glow,vec3(0.0)),vec3(u_gamma)),1.0);'),
+    'Metal fragment must output alpha=1.0');
   const waterfallProfile=gl.draws.slice(start).filter(d=>d.count===23040);
   assert.deepEqual(waterfallProfile.map(d=>d.uniforms.u_profile),
     [[0,4],[.38,2],[.83,1.5]],
     'Internal flow must track the corresponding curved surface');
   probe.setParams({bassProfileAmp:1,bassProfileWave:1,
     midProfileAmp:1,midProfileWave:1,highProfileAmp:1,highProfileWave:1,
-    sideGoldWidth:.10});
+    sideGoldWidth:.10,bassThickness:1.4,midThickness:.7,highThickness:1.3});
+  const thickStart=gl.draws.length;
+  scheduled(performance.now()+36);
+  const thicknessDraws=gl.draws.slice(thickStart).filter(d=>d.mode===gl.TRIANGLES&&d.count===128*40*6);
+  const expectedThick=[.7,.7,.266,.266,.351,.351];
+  thicknessDraws.forEach((d,i)=>close(d.uniforms.u_thickness,expectedThick[i],1e-6));
+  const adjusted=probe.metrics.lensExtentsY;
+  adjusted.forEach((x,i)=>{
+    close(x.upperCenterY-x.convexY,expectedThick[i*2],1e-6);
+    close(x.upperRimY-x.lowerRimY,.24*expectedThick[i*2],1e-6);
+  });
+  // At 0% no opaque coating pass is emitted; existing transparent rim remains.
+  probe.setParams({sideGoldWidth:0});
+  const noGoldStart=gl.draws.length;
+  scheduled(performance.now()+40);
+  assert.equal(gl.draws.slice(noGoldStart).filter(d=>d.uniforms.u_surface===5).length,0);
+  probe.setParams({sideGoldWidth:.10});
   gl.draws.length=0;
   scheduled(performance.now()+44);
   const draws=gl.draws.filter(d=>d.mode===gl.POINTS&&d.count===23040);
