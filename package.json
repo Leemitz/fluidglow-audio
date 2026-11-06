@@ -1,10 +1,10 @@
 {
   "name": "fluidglow-audio",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "private": true,
   "description": "Three coaxial spectral lenses and bass-triggered particle wavefronts",
   "scripts": {
-    "test": "node tests/audio-dynamics.cjs && node tests/bass-integral.cjs && node tests/biconvex.cjs && node tests/playlist.cjs && node tests/optics.cjs && node tests/visualizer.cjs"
+    "test": "node tests/audio-dynamics.cjs && node tests/bass-integral.cjs && node tests/meniscus.cjs && node tests/playlist.cjs && node tests/optics.cjs && node tests/visualizer.cjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
