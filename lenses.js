@@ -4,7 +4,9 @@
 (function (root) {
   'use strict';
   const DEFAULTS = Object.freeze({
-    size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
+    size: 1, spread: 1, incline: -.97, rotation: .48, thickness: .50,
+    bassProfileAmp: 1, bassProfileWave: 1, midProfileAmp: 1, midProfileWave: 1,
+    highProfileAmp: 1, highProfileWave: 1, sideGoldWidth: 0, bandWidth: 2.6, bandSpacing: 3.2, bandOffset: -.5, finiteBands: 5, outerDecay: 1.8,
     reflection: .72, opacity: .26, glow: 1.30, whiteLight: .60, aura: .20, roughness: .10, edgeGlow: 1.05,
     interReflection: .70, fresnelEdge: .85, convexFresnel: 1.10, midFade: .58, highFade: .28, edgeSat: .18, lightLayout: 1,
     convexFrost: .12, faceTransition: 18, waterfallDensity: 1.55, waterfallSpeed: .24, waterfallGlow: 1.05, midMotion: 2.0, highMotion: 2.25,
@@ -24,17 +26,43 @@
     attribute vec3 a_position, a_normal;
     uniform vec2 u_res, u_pan;
     uniform mediump vec3 u_diskX, u_diskZ, u_axisY;
-    uniform float u_zoom, u_radius, u_depth, u_thickness;
+    uniform float u_zoom, u_radius, u_depth, u_thickness, u_surface;
+    uniform vec2 u_profile;
     varying vec3 v_normal, v_local, v_position;
     void main() {
-      vec3 local = vec3(a_position.xy * u_radius, a_position.z * u_thickness);
-      // Scene +Y runs from large to small: upper (+Y) face is concave,
-      // lower (-Y) face is convex, both using a cosine-eased profile.
-      vec3 world = u_diskX * local.x + u_diskZ * local.y + u_axisY * (u_depth - local.z);
-      v_position = world;
-      v_local = a_position;
-      v_normal = normalize(u_diskX * a_normal.x * u_thickness / u_radius
-        + u_diskZ * a_normal.y * u_thickness / u_radius - u_axisY * a_normal.z);
+      // The GPU regenerates each face and normal from that lens's OWN
+      // amplitude and wavelength. r is normalized lens radius, 0..1.
+      // wavelengthRatio=lambda/diameter >=1, so the sampled angle never
+      // exceeds PI and the face cannot develop a second peak.
+      float rho=clamp(length(a_position.xy),0.0,1.0);
+      float amp=clamp(u_profile.x,0.0,1.0);
+      float wave=max(1.0,u_profile.y);
+      float angle=3.14159265/wave;
+      float divisor=max(.00001,1.0-cos(angle));
+      float easing=(1.0-cos(angle*rho))/divisor;
+      float derivative=angle*sin(angle*rho)/divisor;
+      float lower=-.50+1.03*amp*easing;
+      float upper=.50+.27*amp*easing;
+      float lowerRim=-.50+1.03*amp;
+      float upperRim=.50+.27*amp;
+      vec3 localNormal=a_normal;
+      float thicknessHeight;
+      if(u_surface<1.5){
+        float side=u_surface<.5?-1.0:1.0;
+        float slope=(side<0.0?1.03:.27)*amp*derivative;
+        float normalR=-side*slope/max(rho,.00001);
+        localNormal=vec3(a_position.xy*normalR,-side);
+        thicknessHeight=side<0.0?lower:upper;
+      }else{
+        // Side UV z is an across-thickness fraction, 0..1.
+        thicknessHeight=mix(lowerRim,upperRim,clamp(a_position.z,0.0,1.0));
+      }
+      vec3 local=vec3(a_position.xy*u_radius,-thicknessHeight*u_thickness);
+      vec3 world=u_diskX*local.x+u_diskZ*local.y+u_axisY*(u_depth-local.z);
+      v_position=world;
+      v_local=a_position;
+      v_normal=normalize(u_diskX*localNormal.x*u_thickness/u_radius
+        +u_diskZ*localNormal.y*u_thickness/u_radius-u_axisY*localNormal.z);
       vec2 p = (world.xy + u_pan) * u_zoom;
       gl_Position = vec4(p * min(u_res.x, u_res.y) / u_res, -world.z * .12, 1.0);
     }`;
@@ -43,9 +71,10 @@
     uniform vec3 u_paletteA, u_paletteB, u_paletteC;
     uniform mediump vec3 u_diskX, u_diskZ, u_axisY;
     uniform vec3 u_lensData0,u_lensData1,u_lensData2;
+    uniform vec2 u_profile0,u_profile1,u_profile2;
     uniform float u_paletteMode, u_time, u_reflection, u_opacity, u_glow,
       u_roughness, u_sat, u_light, u_gamma, u_energy, u_surfaceMotion, u_surface, u_bandWidth,
-      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight, u_finiteBands, u_outerDecay;
+      u_edgeGlow, u_faceMix, u_lensIndex, u_interReflection, u_fresnelEdge, u_convexFresnel, u_lensFade, u_midFade, u_highFade, u_edgeSat, u_lightLayout, u_convexFrost, u_bandSpacing, u_bandOffset, u_whiteLight, u_finiteBands, u_outerDecay, u_sideGoldWidth;
     varying vec3 v_normal, v_local, v_position;
     // Analytic unlit studio: reflected view rays intersect finite virtual
     // softbox panels. No image texture, UV-painted stripe, or scene light API.
@@ -156,42 +185,50 @@
     void keepHit(float t,vec3 normal,float kind,inout vec4 hit,inout float part) {
       if(t>.003&&t<hit.x){hit=vec4(t,normalize(normal));part=kind;}
     }
-    float easeRadius(float rho) {
-      return .5-.5*cos(3.14159265*clamp(rho,0.0,1.0));
+    float easeRadius(float rho,vec2 profile) {
+      float angle=3.14159265/max(1.0,profile.y);
+      float denom=max(.00001,1.0-cos(angle));
+      return (1.0-cos(angle*clamp(rho,0.0,1.0)))/denom;
     }
-    float faceHeight(float rho,float face) {
-      float e=easeRadius(rho);
-      return face<.5?-.50+1.03*e:.50+.27*e;
+    float faceHeight(float rho,float face,vec2 profile) {
+      float a=clamp(profile.x,0.0,1.0);
+      float e=easeRadius(rho,profile);
+      return face<.5?-.50+1.03*a*e:.50+.27*a*e;
     }
-    float faceSlope(float rho,float face) {
-      return (face<.5?1.03:.27)*1.570796327*sin(3.14159265*clamp(rho,0.0,1.0));
+    float faceSlope(float rho,float face,vec2 profile) {
+      float angle=3.14159265/max(1.0,profile.y);
+      float derivative=angle*sin(angle*clamp(rho,0.0,1.0))
+        /max(.00001,1.0-cos(angle));
+      return (face<.5?1.03:.27)*clamp(profile.x,0.0,1.0)*derivative;
     }
-    float faceResidual(vec3 p,float radius,float centerY,float thick,float face) {
-      return p.y-centerY-thick*faceHeight(length(p.xz)/radius,face);
+    float faceResidual(vec3 p,float radius,float centerY,float thick,float face,vec2 profile) {
+      return p.y-centerY-thick*faceHeight(length(p.xz)/radius,face,profile);
     }
-    float bodyResidual(vec3 p,float radius,float centerY,float thick){
+    float bodyResidual(vec3 p,float radius,float centerY,float thick,vec2 profile){
       float rho=length(p.xz)/radius;
-      float lo=centerY+thick*faceHeight(rho,0.0);
-      float hi=centerY+thick*faceHeight(rho,1.0);
+      float lo=centerY+thick*faceHeight(rho,0.0,profile);
+      float hi=centerY+thick*faceHeight(rho,1.0,profile);
       return max(lo-p.y,p.y-hi);
     }
-    void traceLens(vec3 p,vec3 d,vec3 lens,inout vec4 hit,inout float part,inout vec3 picked) {
+    void traceLens(vec3 p,vec3 d,vec3 lens,vec2 profile,inout vec4 hit,inout float part,inout vec3 picked) {
       float radius=lens.x,centerY=lens.y,thick=lens.z;
       vec3 oc=p-vec3(0.0,centerY,0.0);
-      float bound=radius*radius+thick*thick*.85;
+      float bound=radius*radius+thick*thick*1.20;
       float projection=dot(oc,d);
       if(projection*projection-dot(oc,oc)+bound<0.0)return;
       if(projection>0.0&&dot(oc,oc)>bound)return;
       float before=hit.x;
       float a=dot(d.xz,d.xz),b=dot(p.xz,d.xz);
       float c=dot(p.xz,p.xz)-radius*radius,disc=b*b-a*c;
-      // Narrow rim: lower edge at +.53 T, upper edge at +.77 T.
+      // Rim tracks amplitude: at zero curvature it is a clear flat slab.
+      float lowerRim=-.50+1.03*clamp(profile.x,0.0,1.0);
+      float upperRim=.50+.27*clamp(profile.x,0.0,1.0);
       if(a>.000001&&disc>=0.0){
         float root=sqrt(disc);
         for(int k=0;k<2;k++){
           float t=(-b+(k==0?-root:root))/a;
           vec3 q=p+d*t;
-          if(q.y>=centerY+thick*.529&&q.y<=centerY+thick*.771)
+          if(q.y>=centerY+thick*(lowerRim-.001)&&q.y<=centerY+thick*(upperRim+.001))
             keepHit(t,vec3(q.x,0.0,q.z),2.0,hit,part);
         }
       }
@@ -200,16 +237,16 @@
       if(abs(d.y)>.0008){
         for(int face=0;face<2;face++){
           float kind=float(face);
-          float ta=(centerY+thick*faceHeight(0.0,kind)-p.y)/d.y;
-          float tb=(centerY+thick*faceHeight(1.0,kind)-p.y)/d.y;
+          float ta=(centerY+thick*faceHeight(0.0,kind,profile)-p.y)/d.y;
+          float tb=(centerY+thick*faceHeight(1.0,kind,profile)-p.y)/d.y;
           float lo=max(.003,min(ta,tb)),hi=min(hit.x,max(ta,tb));
           if(hi<=lo)continue;
-          float flo=faceResidual(p+d*lo,radius,centerY,thick,kind);
-          float fhi=faceResidual(p+d*hi,radius,centerY,thick,kind);
+          float flo=faceResidual(p+d*lo,radius,centerY,thick,kind,profile);
+          float fhi=faceResidual(p+d*hi,radius,centerY,thick,kind,profile);
           if(flo*fhi>0.0)continue;
           for(int j=0;j<9;j++){
             float mid=(lo+hi)*.5;
-            float v=faceResidual(p+d*mid,radius,centerY,thick,kind);
+            float v=faceResidual(p+d*mid,radius,centerY,thick,kind,profile);
             if(flo*v<=0.0)hi=mid;else{lo=mid;flo=v;}
           }
           float t=(lo+hi)*.5;
@@ -217,7 +254,7 @@
           float rad=length(q.xz),rho=rad/radius;
           if(rho>1.001)continue;
           float side=face==0?-1.0:1.0;
-          float slope=(thick/radius)*faceSlope(rho,kind);
+          float slope=(thick/radius)*faceSlope(rho,kind,profile);
           vec3 normal=vec3(-side*q.x*slope/max(rad,.00001),side,
             -side*q.z*slope/max(rad,.00001));
           keepHit(t,normal,kind,hit,part);
@@ -228,22 +265,22 @@
         float root=sqrt(disc);
         float entry=max(.003,(-b-root)/a),nearest=min(hit.x,-b/a);
         if(nearest>entry){
-          float v0=bodyResidual(p+d*entry,radius,centerY,thick);
-          float v1=bodyResidual(p+d*nearest,radius,centerY,thick);
+          float v0=bodyResidual(p+d*entry,radius,centerY,thick,profile);
+          float v1=bodyResidual(p+d*nearest,radius,centerY,thick,profile);
           if(v0>=0.0&&v1<=0.0){
             float lo=entry,hi=nearest;
             for(int step=0;step<9;step++){
               float mid=(lo+hi)*.5;
-              if(bodyResidual(p+d*mid,radius,centerY,thick)>0.0)lo=mid;else hi=mid;
+              if(bodyResidual(p+d*mid,radius,centerY,thick,profile)>0.0)lo=mid;else hi=mid;
             }
             float t=(lo+hi)*.5;
             vec3 q=p+d*t;
             float rad=length(q.xz),rho=rad/radius;
-            float bottom=centerY+thick*faceHeight(rho,0.0);
-            float top=centerY+thick*faceHeight(rho,1.0);
+            float bottom=centerY+thick*faceHeight(rho,0.0,profile);
+            float top=centerY+thick*faceHeight(rho,1.0,profile);
             float kind=abs(q.y-bottom)<abs(q.y-top)?0.0:1.0;
             float side=kind<.5?-1.0:1.0;
-            float slope=(thick/radius)*faceSlope(rho,kind);
+            float slope=(thick/radius)*faceSlope(rho,kind,profile);
             vec3 normal=vec3(-side*q.x*slope/max(rad,.00001),side,
               -side*q.z*slope/max(rad,.00001));
             keepHit(t,normal,kind,hit,part);
@@ -254,9 +291,9 @@
     }
     vec4 neighborReflection(vec3 p,vec3 d) {
       vec4 hit=vec4(1000.0,0.0,1.0,0.0);float part=0.0;vec3 picked=vec3(1.0,0.0,.5);
-      if(abs(u_lensIndex-0.0)>.1)traceLens(p,d,u_lensData0,hit,part,picked);
-      if(abs(u_lensIndex-1.0)>.1)traceLens(p,d,u_lensData1,hit,part,picked);
-      if(abs(u_lensIndex-2.0)>.1)traceLens(p,d,u_lensData2,hit,part,picked);
+      if(abs(u_lensIndex-0.0)>.1)traceLens(p,d,u_lensData0,u_profile0,hit,part,picked);
+      if(abs(u_lensIndex-1.0)>.1)traceLens(p,d,u_lensData1,u_profile1,hit,part,picked);
+      if(abs(u_lensIndex-2.0)>.1)traceLens(p,d,u_lensData2,u_profile2,hit,part,picked);
       if(hit.x>999.0)return vec4(0.0);
       vec3 point=p+d*hit.x,n=hit.yzw;
       vec2 bars=studioBarsLocal(point,reflect(d,n),1.0-step(1.5,part));
