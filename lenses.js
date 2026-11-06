@@ -336,6 +336,25 @@
       if (dot(n,view) < 0.0) n = -n;
       float fresnel = pow(1.0 - abs(n.z), 3.0);
       vec3 p=sceneVector(v_position),ray=sceneVector(reflect(-view,n));
+      // Dedicated OPAQUE metal pass, drawn after all glass for this lens
+      // with GL_BLEND disabled. No lensFade or .90 alpha clamp applies.
+      if(u_surface>4.5){
+        float coated=clamp(u_sideGoldWidth,0.0,1.0);
+        float edgeDistance=min(clamp(v_local.z,0.0,1.0),
+                               1.0-clamp(v_local.z,0.0,1.0));
+        if(coated<.00001 || edgeDistance>coated*.5)discard;
+        vec2 metalStudio=studioBarsLocal(p,ray,0.0);
+        float lightBand=clamp(metalStudio.x*.65+metalStudio.y*.85,0.0,1.6);
+        float grazing=pow(1.0-abs(dot(n,view)),2.0);
+        vec3 goldBase=mix(u_paletteB,u_paletteA,.58);
+        vec3 goldWhite=mix(u_paletteA,vec3(1.0),.88);
+        float mirrorHighlight=pow(max(dot(normalize(reflect(-view,n)),
+                    normalize(u_diskX*.35+u_diskZ*.49+u_axisY*.80)),0.0),18.0);
+        vec3 metal=goldBase*(.73+.35*grazing+.22*u_energy)
+                   +goldWhite*(lightBand*.68+mirrorHighlight*1.3);
+        gl_FragColor=vec4(pow(max(metal*u_glow,vec3(0.0)),vec3(u_gamma)),1.0);
+        return;
+      }
       float convex=1.0-step(1.5,u_surface),frost=convex*u_convexFrost;
       // Identical front/back materials. Face mix is only a symmetric,
       // small edge-on softness control, never a one-sided flat mirror.
@@ -398,26 +417,13 @@
         col+=mix(u_paletteA,vec3(1.0),.72)*strength*.90;
         alpha+=strength*.58;
       }
-      // Sidewall UV runs 0 -> 1 from LOWER to UPPER surface.
-      // Two very narrow gold-plated bands grow inward from both rims.
-      // width=0 retains completely unchanged clear glass; width=1 coats all.
+      // The transparent sidewall retains its original glass guide.
+      // Metal is rendered separately, fully opaque and specular.
       if (u_surface > 1.5) {
         float across=clamp(v_local.z,0.0,1.0);
         float guide=u_edgeGlow*(.55+.45*sin(across*3.14159265))*(.70+.30*fresnel);
         col=mix(vec3(1.0),guideTint(),.22)*guide*.75*(1.0+.12*u_energy);
         alpha=u_opacity*(.035+.16*guide);
-        if(u_surface<2.5){
-          float width=clamp(u_sideGoldWidth,0.0,1.0);
-          float halfWidth=.5*width;
-          float distanceToRim=min(across,1.0-across);
-          float gilded=(1.0-smoothstep(max(0.0,halfWidth-.012),
-            halfWidth+.012,distanceToRim))*smoothstep(.0,.01,width);
-          gilded=mix(gilded,1.0,smoothstep(.98,1.0,width));
-          vec3 gold=mix(u_paletteB,u_paletteA,.66)*
-            (.72+.24*fresnel+.32*max(warm,cool));
-          col=mix(col,gold*u_glow,gilded);
-          alpha=mix(alpha,.64+.20*fresnel,gilded);
-        }
       }
       if (u_surface > 2.5) {
         alpha = (u_surface < 3.5 ? .025 : .012)*u_edgeGlow;
@@ -854,6 +860,15 @@
         f(lensProgram, 'surface', 4); f(lensProgram, 'radius',radii[i]*P.size*1.028);
         mesh(sideBuffer,side.length/6,gl.TRIANGLES);
         gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+        if(P.sideGoldWidth>0.0001){
+          // Metal hides what is behind it, unlike the former blended tint.
+          // This pass never scales the opacity by middle/far-lens fade.
+          gl.disable(gl.BLEND);
+          f(lensProgram,'surface',5);
+          f(lensProgram,'radius',radii[i]*P.size*1.004);
+          mesh(sideBuffer,side.length/6,gl.TRIANGLES);
+          gl.enable(gl.BLEND);
+        }
       }
       // Render the waterfall after the glass so the dust glimmers visibly
       // through the translucent caps. Positions stay inside both surfaces.
