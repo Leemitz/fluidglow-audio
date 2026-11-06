@@ -489,10 +489,13 @@
       // Use the very same user-controlled profile as the glass surface.
       float wave=max(1.0,u_profile.y);
       float arc=3.14159265/wave;
-      float easing=(1.0-cos(arc*r))/max(.00001,1.0-cos(arc));
+      float waveShape=(1.0-cos(arc*r))/max(.00001,1.0-cos(arc));
       float amp=clamp(u_profile.x,0.0,1.0);
-      float lower=-.50+1.03*amp*easing;
-      float upper=.50+.27*amp*easing;
+      float baseShape=.5-.5*cos(3.14159265*r);
+      float middle=.65*mix(r,waveShape,amp);
+      float gap=1.0-.76*baseShape;
+      float lower=middle-.5*gap;
+      float upper=middle+.5*gap;
       float inside=clamp(.5+(a_flow.w*2.0-1.0)*.36,.12,.88);
       float height=mix(lower,upper,inside);
       vec3 world=(u_diskX*cos(angle)+u_diskZ*sin(angle))*(u_radius*r)
