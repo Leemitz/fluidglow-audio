@@ -210,6 +210,38 @@
           keepHit(t,normal,float(face),hit,part);
         }
       }
+      // Grazing rays can enter a convex face radially while d.y is nearly
+      // zero, even when neither Y-slab bracket crosses the profile.
+      // Trace from the cylinder entrance toward closest lateral approach
+      // and bisect the exact biconvex surface when there is an entry.
+      if(hit.x>=before&&a>.000001&&disc>=0.0&&abs(d.y)<.25){
+        float root=sqrt(disc);
+        float entry=max(.003,(-b-root)/a);
+        float nearest=min(hit.x,-b/a);
+        if(nearest>entry){
+          vec3 q0=p+d*entry,q1=p+d*nearest;
+          float v0=abs(q0.y-centerY)-thick*capHalfRatio(length(q0.xz)/radius);
+          float v1=abs(q1.y-centerY)-thick*capHalfRatio(length(q1.xz)/radius);
+          if(v0>=0.0&&v1<=0.0){
+            float lo=entry,hi=nearest;
+            for(int step=0;step<9;step++){
+              float mid=(lo+hi)*.5;
+              vec3 q=p+d*mid;
+              float value=abs(q.y-centerY)-thick*capHalfRatio(length(q.xz)/radius);
+              if(value>0.0)lo=mid;else hi=mid;
+            }
+            float t=(lo+hi)*.5;
+            vec3 q=p+d*t;
+            float distanceXZ=length(q.xz);
+            float rho=clamp(distanceXZ/radius,0.0,1.0);
+            float slope=(thick/radius)*.88*.785398163*sin(3.14159265*rho);
+            float side=q.y<centerY?-1.0:1.0;
+            vec3 normal=vec3(q.x*slope/max(distanceXZ,.00001),side,
+              q.z*slope/max(distanceXZ,.00001));
+            keepHit(t,normal,side<0.0?0.0:1.0,hit,part);
+          }
+        }
+      }
       if(hit.x<before)picked=lens;
     }
     vec4 neighborReflection(vec3 p,vec3 d) {
